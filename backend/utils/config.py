@@ -18,9 +18,17 @@ class Config:
     batch_size: int
     max_concurrency: int
     long_ticket_word_limit: int
+    max_upload_size: int
     request_timeout: float
     summary_model: str
     log_level: str
+
+
+def _env(name: str, default: str) -> str:
+    """os.environ.get(name, default) only falls back on a MISSING key; an
+    empty string (e.g. `MAX_UPLOAD_SIZE=` in .env.example) would otherwise
+    fail int()/float() conversion instead of using the default."""
+    return os.environ.get(name) or default
 
 
 def load_config() -> Config:
@@ -28,10 +36,12 @@ def load_config() -> Config:
     return Config(
         llm_model=llm_model,
         api_key=os.environ["API_KEY"],
-        batch_size=int(os.environ.get("BATCH_SIZE", 10)),
-        max_concurrency=int(os.environ.get("MAX_CONCURRENCY", 5)),
-        long_ticket_word_limit=int(os.environ.get("LONG_TICKET_WORD_LIMIT", 300)),
-        request_timeout=float(os.environ.get("REQUEST_TIMEOUT", 30)),
+        batch_size=int(_env("BATCH_SIZE", "10")),
+        max_concurrency=int(_env("MAX_CONCURRENCY", "5")),
+        long_ticket_word_limit=int(_env("LONG_TICKET_WORD_LIMIT", "300")),
+        # 5 MB default — CLAUDE.md leaves this implementation-defined.
+        max_upload_size=int(_env("MAX_UPLOAD_SIZE", "5000000")),
+        request_timeout=float(_env("REQUEST_TIMEOUT", "30")),
         summary_model=os.environ.get("SUMMARY_MODEL") or llm_model,
-        log_level=os.environ.get("LOG_LEVEL", "INFO"),
+        log_level=_env("LOG_LEVEL", "INFO"),
     )
