@@ -1,0 +1,22 @@
+# Internal project docs (never pushed to remote)
+backend/CLAUDE.md
+frontend/CLAUDE.md
+backend/data/*.csv
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Env / secrets
+.env
+
+# Node (frontend, future)
+node_modules/
+
+# OS
+.DS_Store
