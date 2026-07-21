@@ -15,9 +15,18 @@ Rules:
 - Every number you mention must come directly from the JSON facts provided.
 - Do not contradict any figure in the facts.
 - Do not introduce a statistic that is not present in the facts.
+- top_category/top_theme are only set when there is a single, unambiguous \
+leader. If either is null, that means there was a TIE for the top spot — \
+check category_leaders/theme_leaders and name all of the tied entries \
+jointly (e.g. "X and Y are tied as the top category"). Never present one \
+tied entry as if it alone were the leader.
+- If category_leaders or theme_leaders lists nearly every distinct value \
+(no real clustering — e.g. every theme appears once), say plainly that no \
+single theme dominates this batch, rather than naming one.
 - Write 3-6 sentences: lead with the dominant pattern, name the top \
-category/theme driving it, note urgency/actionable signal if notable, and \
-mention any clearly positive signal if present.
+category/theme driving it (or the tie, per the rule above), note urgency/ \
+actionable signal if notable, and mention any clearly positive signal if \
+present.
 - Plain prose only. No headers, no bullet points, no JSON.
 """
 

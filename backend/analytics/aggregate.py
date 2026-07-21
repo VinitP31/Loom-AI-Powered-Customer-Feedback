@@ -17,6 +17,18 @@ def _pct(n: int, denominator: int) -> float:
     return round(n / denominator * 100, 1) if denominator else 0.0
 
 
+def _leaders(counts: dict) -> list[str]:
+    """All keys tied for the max count, alphabetical. `Counter.most_common`
+    breaks ties by insertion order, which silently crowns an arbitrary
+    winner on tie-heavy data (e.g. a 9-ticket sample with 9 distinct
+    themes has NO leader — every theme is tied at 1). Ties must be surfaced,
+    not hidden behind whichever value happened to appear first."""
+    if not counts:
+        return []
+    max_count = max(counts.values())
+    return sorted(k for k, v in counts.items() if v == max_count)
+
+
 def compute_analytics(
     classifications: list[TicketClassification], validation_report: ValidationReport
 ) -> dict:
@@ -36,6 +48,9 @@ def compute_analytics(
         for issue in c.additional_issues:
             urgency_rollup[issue.urgency.value] += 1
 
+    category_leaders = _leaders(category_counts)
+    theme_leaders = _leaders(theme_counts)
+
     return {
         "total_uploaded": total_uploaded,
         "total_processed": processed,
@@ -51,8 +66,14 @@ def compute_analytics(
         "urgency_rollup_with_additional_issues": dict(urgency_rollup),
         "actionable_count": actionable_count,
         "actionable_pct": _pct(actionable_count, processed),
-        "top_category": category_counts.most_common(1)[0][0] if category_counts else None,
-        "top_theme": theme_counts.most_common(1)[0][0] if theme_counts else None,
+        # top_category/top_theme are only set when there is a single,
+        # unambiguous leader. On a tie, they are None and the tied names
+        # are listed in category_leaders/theme_leaders instead — never
+        # silently pick one.
+        "top_category": category_leaders[0] if len(category_leaders) == 1 else None,
+        "category_leaders": category_leaders,
+        "top_theme": theme_leaders[0] if len(theme_leaders) == 1 else None,
+        "theme_leaders": theme_leaders,
         "top_categories": [c for c, _ in category_counts.most_common(3)],
         "top_themes": [t for t, _ in theme_counts.most_common(3)],
     }

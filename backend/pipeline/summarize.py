@@ -50,13 +50,22 @@ def maybe_summarize(
     return summary, True
 
 
+def _leader_text(single: str | None, tied: list[str]) -> str:
+    if single:
+        return single
+    if tied:
+        return " / ".join(tied) + " (tied)"
+    return "unknown"
+
+
 def _fallback_summary_text(facts: dict) -> str:
     """Deterministic, non-LLM fallback if the narration call itself fails.
     Plain restatement of the facts already computed in Python — no new
-    numbers are introduced."""
+    numbers are introduced. Ties are shown as ties, never collapsed to a
+    single arbitrary leader."""
     total = facts.get("total_processed", "unknown")
-    top_category = facts.get("top_category", "unknown")
-    top_theme = facts.get("top_theme", "unknown")
+    top_category = _leader_text(facts.get("top_category"), facts.get("category_leaders", []))
+    top_theme = _leader_text(facts.get("top_theme"), facts.get("theme_leaders", []))
     return (
         f"Processed {total} feedback items. Top category: {top_category}. "
         f"Top theme: {top_theme}. (Narrative summary unavailable — LLM call failed.)"
