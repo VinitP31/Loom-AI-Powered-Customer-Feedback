@@ -96,12 +96,19 @@ class LLMClient:
                 return block.input
         raise LLMProviderError(f"no tool_use block named '{tool_name}' in response")
 
-    def text_call(self, system_prompt: str, user_message: str, max_tokens: int = 1024) -> str:
-        """Plain-text completion for summarization / executive summary."""
+    def text_call(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int = 1024,
+        model: str | None = None,
+    ) -> str:
+        """Plain-text completion for summarization / executive summary.
+        `model` overrides self.model for this call (e.g. SUMMARY_MODEL)."""
 
         def _call():
             return self._client.messages.create(
-                model=self.model,
+                model=model or self.model,
                 max_tokens=max_tokens,
                 temperature=0,
                 system=system_prompt,
