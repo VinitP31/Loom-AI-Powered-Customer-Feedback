@@ -29,12 +29,11 @@ class AdditionalIssue(BaseModel):
         return self
 
 
-class TicketClassification(BaseModel):
-    """Full per-ticket enrichment. Pure enumeration block by design —
-    no free-text/reasoning field (see Loom_Source_of_Truth.md, Output
-    Schema section)."""
+class ClassificationOutput(BaseModel):
+    """Exactly what the LLM produces — no ticket_id. The backend assigns
+    ticket_id; the model is never asked for it. This is also the shape
+    used to build the tool's input_schema for structured output."""
 
-    ticket_id: str
     primary_category: Category
     primary_theme: Theme
     sentiment: Sentiment
@@ -43,9 +42,18 @@ class TicketClassification(BaseModel):
     additional_issues: list[AdditionalIssue] = []
 
     @model_validator(mode="after")
-    def primary_theme_belongs_to_primary_category(self) -> "TicketClassification":
+    def primary_theme_belongs_to_primary_category(self) -> "ClassificationOutput":
         _check_theme_in_category(self.primary_category, self.primary_theme)
         return self
+
+
+class TicketClassification(ClassificationOutput):
+    """Full per-ticket enrichment: ClassificationOutput plus the
+    backend-assigned ticket_id. Pure enumeration block by design — no
+    free-text/reasoning field (see Loom_Source_of_Truth.md, Output Schema
+    section)."""
+
+    ticket_id: str
 
 
 def fallback_classification(ticket_id: str) -> TicketClassification:
