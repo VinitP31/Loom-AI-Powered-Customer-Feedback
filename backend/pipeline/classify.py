@@ -1,7 +1,9 @@
 """Stage 5: batch classification. One LLM call per ticket, temperature 0,
 each ticket succeeding or falling back independently (batch independence —
 one ticket's failure never affects another). Every response passes through
-the fixed validate -> coerce -> re-prompt(x1) -> fallback sequence.
+the fixed validate -> coerce -> re-prompt(x1) -> fallback sequence, applied
+uniformly regardless of failure type (malformed JSON / no tool call included
+— see _attempt_once).
 """
 
 import json
@@ -30,7 +32,9 @@ def _coerce(raw) -> dict | None:
     hands back a parsed dict, so this is mostly a no-op safety net for the
     case the raw payload ever arrives as a string (e.g. a future non-tool
     code path): strip code fences, trim, extract the outermost JSON
-    object, re-parse."""
+    object, re-parse. Returns None (a safe no-op) when there's nothing to
+    coerce — callers must treat that as "coercion didn't help", not as an
+    error."""
     if isinstance(raw, dict):
         return raw
     if not isinstance(raw, str):
@@ -49,12 +53,22 @@ def _coerce(raw) -> dict | None:
         return None
 
 
-def _validate(raw: dict, ticket_id: str) -> tuple[TicketClassification | None, str | None]:
+def _validate(
+    raw: dict, ticket_id: str, feedback_text: str, was_summarized: bool
+) -> tuple[TicketClassification | None, str | None]:
     try:
         output = ClassificationOutput.model_validate(raw)
     except ValidationError as exc:
         return None, str(exc)
-    return TicketClassification(ticket_id=ticket_id, **output.model_dump()), None
+    return (
+        TicketClassification(
+            ticket_id=ticket_id,
+            feedback_text=feedback_text,
+            was_summarized=was_summarized,
+            **output.model_dump(),
+        ),
+        None,
+    )
 
 
 def _safe_structured_call(llm_client: LLMClient, user_message: str) -> tuple[dict | None, str | None]:
@@ -66,62 +80,92 @@ def _safe_structured_call(llm_client: LLMClient, user_message: str) -> tuple[dic
         return None, str(exc)
 
 
-def classify_ticket(ticket_id: str, cleaned_text: str, llm_client: LLMClient) -> TicketClassification:
-    """Contract: repair at most once, never loop, always end in a valid
-    object. Any unrecovered path — API failure or validation failure —
-    ends in the fallback shape, never an exception."""
-    user_message = build_classification_user_message(cleaned_text)
-
+def _attempt_once(
+    llm_client: LLMClient,
+    user_message: str,
+    ticket_id: str,
+    feedback_text: str,
+    was_summarized: bool,
+) -> tuple[TicketClassification | None, str | None]:
+    """One full validate -> coerce cycle for one LLM call. A call-level
+    failure (malformed JSON, no tool call, transport error) is NOT a
+    special case: `raw` is simply None, coerce() harmlessly no-ops on
+    None, and the call's error string is returned so the caller can feed
+    it into the one guaranteed re-prompt — exactly the same path a
+    schema-validation failure takes. This is what makes coerce + the one
+    re-prompt apply uniformly to every failure type."""
     raw, call_error = _safe_structured_call(llm_client, user_message)
     if call_error:
-        logger.warning("ticket %s: classification call failed: %s", ticket_id, call_error)
-        return fallback_classification(ticket_id)
+        return None, call_error
 
-    obj, err = _validate(raw, ticket_id)
+    obj, err = _validate(raw, ticket_id, feedback_text, was_summarized)
     if obj:
-        return obj
+        return obj, None
 
     coerced = _coerce(raw)
     if coerced is not None:
-        obj, coerce_err = _validate(coerced, ticket_id)
+        obj, coerce_err = _validate(coerced, ticket_id, feedback_text, was_summarized)
         if obj:
-            return obj
+            return obj, None
         err = coerce_err
 
+    return None, err
+
+
+def classify_ticket(
+    ticket_id: str,
+    text_to_classify: str,
+    feedback_text: str,
+    was_summarized: bool,
+    llm_client: LLMClient,
+) -> TicketClassification:
+    """Contract: repair at most once, never loop, always end in a valid
+    object. `text_to_classify` is what's sent to the model (the summary,
+    for long tickets); `feedback_text` is always the original cleaned/
+    redacted text, attached to the result regardless of what was
+    classified. Any unrecovered path — API failure or validation failure,
+    including malformed JSON or a missing tool call — gets coerce and the
+    one guaranteed re-prompt before falling back; never an exception."""
+    user_message = build_classification_user_message(text_to_classify)
+
+    obj, err = _attempt_once(llm_client, user_message, ticket_id, feedback_text, was_summarized)
+    if obj:
+        return obj
+
     nudged_message = f"{user_message}\n\n{REPROMPT_NUDGE_TEMPLATE.format(error=err)}"
-    raw2, call_error2 = _safe_structured_call(llm_client, nudged_message)
-    if not call_error2:
-        obj, _ = _validate(raw2, ticket_id)
-        if obj:
-            return obj
+    obj, _ = _attempt_once(llm_client, nudged_message, ticket_id, feedback_text, was_summarized)
+    if obj:
+        return obj
 
     logger.warning("ticket %s: falling back after repair sequence exhausted", ticket_id)
-    return fallback_classification(ticket_id)
+    return fallback_classification(ticket_id, feedback_text, was_summarized)
 
 
 def classify_batch(
-    tickets: list[tuple[str, str]],
+    tickets: list[tuple[str, str, str, bool]],
     llm_client: LLMClient,
     batch_size: int = 10,
     max_concurrency: int = 5,
 ) -> list[TicketClassification]:
-    """tickets: list of (ticket_id, cleaned_text) pairs, in the order
-    results should be returned. Grouped into batches of batch_size for
-    throughput bookkeeping; each batch runs with max_concurrency in-flight
-    calls. classify_ticket() never raises, so one bad ticket cannot affect
-    any other."""
+    """tickets: list of (ticket_id, text_to_classify, feedback_text,
+    was_summarized) in the order results should be returned. Grouped into
+    batches of batch_size for throughput bookkeeping; each batch runs with
+    max_concurrency in-flight calls. classify_ticket() never raises, so
+    one bad ticket cannot affect any other."""
     results: list[TicketClassification] = []
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
         for i in range(0, len(tickets), batch_size):
             chunk = tickets[i : i + batch_size]
             futures = [
-                executor.submit(classify_ticket, ticket_id, text, llm_client)
-                for ticket_id, text in chunk
+                executor.submit(
+                    classify_ticket, ticket_id, text, feedback_text, was_summarized, llm_client
+                )
+                for ticket_id, text, feedback_text, was_summarized in chunk
             ]
-            for ticket_id, future in zip((t[0] for t in chunk), futures):
+            for (ticket_id, _text, feedback_text, was_summarized), future in zip(chunk, futures):
                 try:
                     results.append(future.result())
                 except Exception:
                     logger.exception("ticket %s: unexpected error in batch worker", ticket_id)
-                    results.append(fallback_classification(ticket_id))
+                    results.append(fallback_classification(ticket_id, feedback_text, was_summarized))
     return results
