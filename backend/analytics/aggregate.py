@@ -32,6 +32,18 @@ def count_fell_back(classifications: list[TicketClassification]) -> int:
     )
 
 
+def _theme_sentiment_avg(classifications: list[TicketClassification]) -> dict[str, float]:
+    """Mean sentiment_score per primary_theme — pure Python over the
+    per-ticket scores the model already returned, never a statistic the
+    model itself computes (Core Principle 1). This is the "which issues
+    are customers most unhappy about" signal: a theme with a very negative
+    average is a priority even if its raw count isn't the highest."""
+    scores_by_theme: dict[str, list[float]] = {}
+    for c in classifications:
+        scores_by_theme.setdefault(c.primary_theme.value, []).append(c.sentiment_score)
+    return {theme: round(sum(scores) / len(scores), 1) for theme, scores in scores_by_theme.items()}
+
+
 def _leaders(counts: dict) -> list[str]:
     """All keys tied for the max count, alphabetical. `Counter.most_common`
     breaks ties by insertion order, which silently crowns an arbitrary
@@ -75,6 +87,7 @@ def compute_analytics(
         "category_distribution": dict(category_counts),
         "category_distribution_pct": {k: _pct(v, processed) for k, v in category_counts.items()},
         "theme_frequency": dict(theme_counts),
+        "theme_sentiment_avg": _theme_sentiment_avg(classifications),
         "sentiment_distribution": dict(sentiment_counts),
         "sentiment_distribution_pct": {k: _pct(v, processed) for k, v in sentiment_counts.items()},
         "urgency_distribution": dict(urgency_counts),

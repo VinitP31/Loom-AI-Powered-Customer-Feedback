@@ -405,6 +405,7 @@ Computed in Python over validated results:
 - Top recurring themes
 - Top categories
 - `fell_back_count` — count of tickets that resolved to the fallback shape (== `Requires Human Review` count, per Fallback Shape). A quality signal for how much of the batch needs human attention, not an error metric.
+- `theme_sentiment_avg` — mean `sentiment_score` per primary theme (theme → one-decimal average), computed in Python over the per-ticket scores the model already returned. This is the "which issues are customers most unhappy about" signal — a theme with a very negative average is a priority even if its raw frequency isn't the highest. Never computed by the model (Core Principle 1).
 - Optionally, an average `sentiment_score` across processed tickets (single-batch; a time-windowed/weekly version requires persistence — see Deferred Extensions)
 
 **Top category/theme tie contract.** `top_category`/`top_theme` are populated ONLY when there is a single, unambiguous leader. On a tie for the highest count, both are `null`, and `category_leaders`/`theme_leaders` list every tied entry instead. Any consumer, including the frontend, must handle the `null` case explicitly and render the leaders list rather than assuming a singular winner always exists.
