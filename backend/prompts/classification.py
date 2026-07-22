@@ -43,33 +43,40 @@ Instructions:
 2. Select exactly one theme that belongs to that primary category, OR one of \
 the cross-category themes above (valid regardless of category) — never a \
 theme from a different category's exclusive list.
-3. {CATEGORY_PERF_FUNCTIONAL_BOUNDARY}
-4. Determine the dominant overall sentiment for the whole ticket: Positive, \
+3. Positive feedback is categorized by its topic, exactly like any other \
+ticket — pick the category describing what the praise is ABOUT (praise about \
+the UI/redesign → Usability & User Experience; praise about billing/payment \
+→ Billing & Payments; praise about a support interaction → Support \
+Experience; etc.), then use the cross-category Positive Feedback theme. Use \
+Other only when the praise has no identifiable topic (e.g. "great product, \
+thanks!"). Never default to Other just because the theme is Positive Feedback.
+4. {CATEGORY_PERF_FUNCTIONAL_BOUNDARY}
+5. Determine the dominant overall sentiment for the whole ticket: Positive, \
 Neutral, or Negative. There is no Mixed value — if the ticket has both \
 praise and complaint, pick whichever dominates.
-5. Determine a ticket-level sentiment_score: a float in [-1.0, +1.0] at \
+6. Determine a ticket-level sentiment_score: a float in [-1.0, +1.0] at \
 one-decimal precision. Its sign must agree with the sentiment label:
    - Positive: score strictly greater than 0, up to and including +1.0.
    - Neutral: score between -0.5 and +0.5, inclusive.
    - Negative: score from -1.0 (inclusive) up to but not including 0.
    Do not compute this from any statistic — it is your own judgment of this \
 one ticket, not an aggregate.
-6. Determine urgency by impact, not tone:
+7. Determine urgency by impact, not tone:
    - High: blocks core functionality (severe outage, payment failure, \
 security/access issue).
    - Medium: an important issue with a workaround or limited impact.
    - Low: minor inconvenience, cosmetic issue, suggestion, or praise.
    A calmly worded "I can't log in at all" is High; an angry complaint about \
 button color is Low.
-7. Determine actionable: true if the ticket requires follow-up by product, \
+8. Determine actionable: true if the ticket requires follow-up by product, \
 engineering, support, or a business team; false for praise or purely \
 informational feedback with nothing to act on.
-8. If the ticket raises more than one distinct issue, identify all of them. \
+9. If the ticket raises more than one distinct issue, identify all of them. \
 Return the most significant as the primary issue with full enrichment. \
 Return every other issue in additional_issues with only its category, \
 theme, and urgency (no sentiment, no sentiment_score — both are whole-ticket \
 properties).
-9. Return valid JSON only, matching the required schema exactly. No prose, \
+10. Return valid JSON only, matching the required schema exactly. No prose, \
 no markdown fences, no explanation.
 """
 
