@@ -23,14 +23,17 @@ logger = logging.getLogger(__name__)
 
 
 def maybe_summarize(
-    ticket_id: str, cleaned_text: str, word_limit: int, llm_client: LLMClient
+    ticket_id: str, cleaned_text: str, is_long: bool, llm_client: LLMClient
 ) -> tuple[str, bool]:
-    """Returns (text_to_classify, was_summarized). Only calls the model
-    when the ticket exceeds word_limit. If the summarization call itself
-    fails, falls back to classifying the original cleaned text rather
-    than dropping the ticket — summarization is a throughput optimization,
-    not a correctness requirement."""
-    if len(cleaned_text.split()) <= word_limit:
+    """Returns (text_to_classify, was_summarized). `is_long` is computed
+    exactly once by the caller (pipeline.preprocess.is_long_ticket on the
+    cleaned text) and reused for both the validation-report warning and
+    this routing decision — this function never recomputes the word count
+    itself, so the two can never disagree. If the summarization call
+    itself fails, falls back to classifying the original cleaned text
+    rather than dropping the ticket — summarization is a throughput
+    optimization, not a correctness requirement."""
+    if not is_long:
         return cleaned_text, False
 
     try:

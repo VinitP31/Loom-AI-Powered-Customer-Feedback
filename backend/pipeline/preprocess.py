@@ -97,3 +97,16 @@ def redact_pii(text: str) -> str:
 def clean_and_redact(text: str, strip_urls: bool = False) -> str:
     """Full Stage 2 + Stage 3 pipeline for one ticket's feedback text."""
     return redact_pii(normalize(text, strip_urls=strip_urls))
+
+
+def word_count(text: str) -> int:
+    return len(text.split())
+
+
+def is_long_ticket(cleaned_text: str, word_limit: int) -> bool:
+    """Single source of truth for the long-ticket threshold check. Must be
+    called on the cleaned/normalized text (post clean_and_redact), and the
+    same result must drive both the validation-report warning and the
+    summarization-routing decision — never two independent word counts on
+    different text versions (Loom_Source_of_Truth.md, Stage 4)."""
+    return word_count(cleaned_text) > word_limit

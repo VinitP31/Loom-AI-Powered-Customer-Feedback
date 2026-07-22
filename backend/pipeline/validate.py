@@ -25,6 +25,13 @@ class FileValidationError(Exception):
 
 @dataclass
 class ValidRow:
+    """warnings starts with html/markdown/duplicate flags only. The
+    "long_ticket" flag is NOT computed here — it requires the cleaned/
+    normalized text, which doesn't exist until Stage 2, so the caller
+    appends it after cleaning, using the same word count that drives the
+    Stage 4 summarization-routing decision (single measurement, never two
+    independent counts — see pipeline.preprocess.is_long_ticket)."""
+
     ticket_id: str
     original_text: str
     warnings: list[str] = field(default_factory=list)
@@ -71,7 +78,7 @@ def _row_ticket_id(row: pd.Series, index: int) -> str:
     return f"row-{index}"
 
 
-def validate_csv(df: pd.DataFrame, long_ticket_word_limit: int) -> ValidationReport:
+def validate_csv(df: pd.DataFrame) -> ValidationReport:
     if REQUIRED_COLUMN not in df.columns:
         raise FileValidationError(4001, f"missing required '{REQUIRED_COLUMN}' column")
 
@@ -97,8 +104,6 @@ def validate_csv(df: pd.DataFrame, long_ticket_word_limit: int) -> ValidationRep
             warnings.append("html_present")
         if has_markdown(text):
             warnings.append("markdown_present")
-        if len(text.split()) > long_ticket_word_limit:
-            warnings.append("long_ticket")
         if text in seen_texts:
             warnings.append("duplicate_feedback")
         seen_texts.add(text)
