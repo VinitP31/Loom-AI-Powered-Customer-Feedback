@@ -59,6 +59,11 @@ one-decimal precision. Its sign must agree with the sentiment label:
    - Positive: score strictly greater than 0, up to and including +1.0.
    - Neutral: score between -0.5 and +0.5, inclusive.
    - Negative: score from -1.0 (inclusive) up to but not including 0.
+   Tickets reporting a real unresolved problem but written in a calm, \
+non-emotional tone should score mildly negative within the Neutral band \
+(approximately -0.2 to -0.3), not 0.0 — the label stays Neutral, but the \
+score should reflect the mild negative lean rather than sitting at dead \
+center.
    Do not compute this from any statistic — it is your own judgment of this \
 one ticket, not an aggregate.
 7. Determine urgency by impact, not tone:
