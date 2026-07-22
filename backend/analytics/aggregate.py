@@ -11,10 +11,25 @@ from collections import Counter
 
 from pipeline.validate import ValidationReport
 from schemas.models import TicketClassification
+from schemas.taxonomy import Category, Theme, Urgency
 
 
 def _pct(n: int, denominator: int) -> float:
     return round(n / denominator * 100, 1) if denominator else 0.0
+
+
+def count_fell_back(classifications: list[TicketClassification]) -> int:
+    """Number of tickets that resolved to the fallback shape this run.
+    Fallback theme is Other/Requires Human Review, and per
+    Loom_Source_of_Truth.md a fallback IS the "requires human review"
+    signal — same thing, counted once. A model-chosen Requires Human
+    Review (rather than a system fallback) is indistinguishable by design,
+    so both count the same way."""
+    return sum(
+        1
+        for c in classifications
+        if c.primary_category == Category.OTHER and c.primary_theme == Theme.REQUIRES_HUMAN_REVIEW
+    )
 
 
 def _leaders(counts: dict) -> list[str]:
@@ -64,8 +79,10 @@ def compute_analytics(
         "sentiment_distribution_pct": {k: _pct(v, processed) for k, v in sentiment_counts.items()},
         "urgency_distribution": dict(urgency_counts),
         "urgency_rollup_with_additional_issues": dict(urgency_rollup),
+        "high_urgency_count": urgency_counts.get(Urgency.HIGH.value, 0),
         "actionable_count": actionable_count,
         "actionable_pct": _pct(actionable_count, processed),
+        "fell_back_count": count_fell_back(classifications),
         # top_category/top_theme are only set when there is a single,
         # unambiguous leader. On a tie, they are None and the tied names
         # are listed in category_leaders/theme_leaders instead — never
