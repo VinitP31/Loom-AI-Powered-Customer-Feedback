@@ -91,7 +91,7 @@ PII Redaction         regex redaction before any text reaches the model
 Long-Ticket Routing   > 300 words → summarization prompt → classification
    │                  otherwise   → classification directly
    ▼
-Batch Builder         group items; respect concurrency cap
+Concurrency Pool      submit all tickets; concurrency cap bounds in-flight calls
    │
    ▼
 LLM Classification    temp 0, one call per ticket, structured JSON
@@ -169,13 +169,13 @@ Only long tickets incur the extra call. Rationale: reduce context, keep the clas
 
 **Mandatory guardrail for the summarization prompt:** the summarizer must be instructed to **preserve every distinct issue and its key specifics**, not to produce a single-topic abstract. Summarization is the one place a secondary issue can silently disappear, which would defeat multi-issue detection (below). The summarization prompt explicitly states: *"Retain all distinct problems, requests, and complaints mentioned; do not merge or drop any issue."*
 
-### Stage 5 — Batch Building & Classification
+### Stage 5 — Classification
 
-Tickets are grouped into batches for throughput management and classified with **one LLM call per ticket** at **temperature 0**. Batching improves execution efficiency only; each ticket is still classified independently. Each response passes through the bounded validate → coerce → single re-prompt → fallback sequence defined under *LLM Contract → Validation & Repair*. A configurable **concurrency cap** limits parallel in-flight calls to stay within provider rate limits.
+Tickets are classified with **one LLM call per ticket** at **temperature 0**, each ticket independent of every other. Each response passes through the bounded validate → coerce → single re-prompt → fallback sequence defined under *LLM Contract → Validation & Repair*. A configurable **concurrency cap** limits parallel in-flight calls to stay within provider rate limits.
 
-**Batches are synchronous barriers:** the current implementation fully drains one batch (waits for every ticket in it to resolve) before submitting the next, even when concurrency slots are free. A continuous pool — bounded only by the concurrency cap, not batch boundaries, so batch N+1 can start filling free slots while batch N is still finishing — is a possible future optimization, not the current behavior.
+**Continuous pool, no sub-batch boundary:** every ticket is submitted to a single worker pool up front, bounded only by the concurrency cap — not grouped into fixed-size batches with a drain-before-next-group barrier. A worker that finishes immediately picks up the next queued ticket, so no slot sits idle waiting on a straggler from an earlier group. (An earlier iteration grouped tickets into fixed-size batches that fully drained before the next group started; that added a synchronization point with no throughput benefit, since real parallelism was already governed by the concurrency cap alone — removed.)
 
-**Batch independence:** the failure, timeout, or malformed response of one ticket must not prevent classification of any other ticket in the same batch. Each ticket succeeds or falls back on its own; there is no shared failure path across a batch.
+**Ticket independence:** the failure, timeout, or malformed response of one ticket must not prevent classification of any other ticket. Each ticket succeeds or falls back on its own; there is no shared failure path.
 
 ### Stage 6 — Analytics
 
@@ -516,7 +516,6 @@ Runtime parameters via environment variables. No secrets in code.
 |----------|---------|---------|
 | LLM_MODEL | Model used for classification inference | — (required) |
 | API_KEY | LLM provider key (env / secrets manager only) | — (required) |
-| BATCH_SIZE | Tickets per batch | 10 |
 | MAX_CONCURRENCY | Cap on parallel in-flight LLM calls | 5 |
 | LONG_TICKET_WORD_LIMIT | Word count triggering summarization | 300 |
 | MAX_UPLOAD_SIZE | Maximum CSV upload size | implementation-defined |
@@ -662,7 +661,7 @@ frontend/
 - [ ] Validation layer (file + row)
 - [ ] Normalization + PII redaction
 - [ ] Long-ticket routing (issue-preserving summarization)
-- [ ] Batch builder with concurrency cap
+- [ ] Concurrency-bounded classification pool
 - [ ] Classification prompt (two-tier category→theme, multi-issue)
 - [ ] Output schema, validation, single repair, fallback shape
 - [ ] Analytics engine

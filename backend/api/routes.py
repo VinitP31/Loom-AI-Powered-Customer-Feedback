@@ -67,9 +67,7 @@ async def analyze(file: UploadFile) -> AnalyzeResponse:
         )
         prepared.append((row.ticket_id, text_to_classify, cleaned, was_summarized))
 
-    classifications = classify_batch(
-        prepared, llm_client, batch_size=config.batch_size, max_concurrency=config.max_concurrency
-    )
+    classifications = classify_batch(prepared, llm_client, max_concurrency=config.max_concurrency)
 
     facts = compute_analytics(classifications, report)
     summary = generate_executive_summary(facts, llm_client, model=config.summary_model)

@@ -8,7 +8,7 @@ uniformly regardless of failure type (malformed JSON / no tool call included
 
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pydantic import ValidationError
 
@@ -144,28 +144,29 @@ def classify_ticket(
 def classify_batch(
     tickets: list[tuple[str, str, str, bool]],
     llm_client: LLMClient,
-    batch_size: int = 10,
     max_concurrency: int = 5,
 ) -> list[TicketClassification]:
     """tickets: list of (ticket_id, text_to_classify, feedback_text,
-    was_summarized) in the order results should be returned. Grouped into
-    batches of batch_size for throughput bookkeeping; each batch runs with
-    max_concurrency in-flight calls. classify_ticket() never raises, so
-    one bad ticket cannot affect any other."""
-    results: list[TicketClassification] = []
+    was_summarized) in the order results should be returned. All tickets are
+    submitted to a single pool bounded only by max_concurrency in-flight
+    calls — no sub-batch boundary, so a finished worker immediately picks up
+    the next queued ticket instead of waiting on stragglers from a prior
+    group. classify_ticket() never raises, so one bad ticket cannot affect
+    any other."""
+    results: list[TicketClassification | None] = [None] * len(tickets)
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        for i in range(0, len(tickets), batch_size):
-            chunk = tickets[i : i + batch_size]
-            futures = [
-                executor.submit(
-                    classify_ticket, ticket_id, text, feedback_text, was_summarized, llm_client
-                )
-                for ticket_id, text, feedback_text, was_summarized in chunk
-            ]
-            for (ticket_id, _text, feedback_text, was_summarized), future in zip(chunk, futures):
-                try:
-                    results.append(future.result())
-                except Exception:
-                    logger.exception("ticket %s: unexpected error in batch worker", ticket_id)
-                    results.append(fallback_classification(ticket_id, feedback_text, was_summarized))
+        future_to_index = {
+            executor.submit(
+                classify_ticket, ticket_id, text, feedback_text, was_summarized, llm_client
+            ): index
+            for index, (ticket_id, text, feedback_text, was_summarized) in enumerate(tickets)
+        }
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
+            ticket_id, _text, feedback_text, was_summarized = tickets[index]
+            try:
+                results[index] = future.result()
+            except Exception:
+                logger.exception("ticket %s: unexpected error in pool worker", ticket_id)
+                results[index] = fallback_classification(ticket_id, feedback_text, was_summarized)
     return results

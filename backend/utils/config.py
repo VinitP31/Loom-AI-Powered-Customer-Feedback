@@ -15,7 +15,6 @@ load_dotenv()
 class Config:
     llm_model: str
     api_key: str
-    batch_size: int
     max_concurrency: int
     long_ticket_word_limit: int
     max_upload_size: int
@@ -36,7 +35,6 @@ def load_config() -> Config:
     return Config(
         llm_model=llm_model,
         api_key=os.environ["API_KEY"],
-        batch_size=int(_env("BATCH_SIZE", "10")),
         max_concurrency=int(_env("MAX_CONCURRENCY", "5")),
         long_ticket_word_limit=int(_env("LONG_TICKET_WORD_LIMIT", "300")),
         # 5 MB default — CLAUDE.md leaves this implementation-defined.

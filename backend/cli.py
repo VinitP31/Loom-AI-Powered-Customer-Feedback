@@ -58,7 +58,6 @@ def run(csv_path: Path) -> None:
         [(ticket_id, text, feedback_text, was_summarized)
          for ticket_id, text, feedback_text, was_summarized, _ in prepared],
         llm_client,
-        batch_size=config.batch_size,
         max_concurrency=config.max_concurrency,
     )
     elapsed = time.perf_counter() - start
