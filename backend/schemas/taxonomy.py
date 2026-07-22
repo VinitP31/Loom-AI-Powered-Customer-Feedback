@@ -14,6 +14,7 @@ class Category(str, Enum):
     FEATURE_REQUESTS = "Feature Requests & Enhancements"
     USABILITY_UX = "Usability & User Experience"
     SUPPORT_EXPERIENCE = "Support Experience"
+    SECURITY = "Security"
     OTHER = "Other"
 
 
@@ -52,15 +53,23 @@ class Theme(str, Enum):
     POOR_LAYOUT = "Poor Layout"
     HARD_TO_FIND_FEATURE = "Hard to Find Feature"
     ACCESSIBILITY_ISSUE = "Accessibility Issue"
-    POSITIVE_EXPERIENCE = "Positive Experience"
     # Support Experience
     SLOW_RESPONSE = "Slow Response"
     UNHELPFUL_AGENT = "Unhelpful Agent"
     ISSUE_UNRESOLVED = "Issue Unresolved"
     DIFFICULT_TO_REACH_SUPPORT = "Difficult to Reach Support"
+    # Security
+    UNAUTHORIZED_ACCESS = "Unauthorized Access"
+    DATA_PRIVACY_CONCERN = "Data Privacy Concern"
+    SUSPICIOUS_ACTIVITY = "Suspicious Activity"
+    VULNERABILITY_REPORT = "Vulnerability Report"
+    PHISHING_SCAM_REPORT = "Phishing/Scam Report"
     # Other
     GENERAL_FEEDBACK = "General Feedback"
     UNCLEAR = "Unclear"
+    REQUIRES_HUMAN_REVIEW = "Requires Human Review"
+    # Cross-category (valid under any category — see UNIVERSAL_THEMES below)
+    POSITIVE_FEEDBACK = "Positive Feedback"
 
 
 class Sentiment(str, Enum):
@@ -117,7 +126,6 @@ CATEGORY_THEMES: dict[Category, set[Theme]] = {
         Theme.POOR_LAYOUT,
         Theme.HARD_TO_FIND_FEATURE,
         Theme.ACCESSIBILITY_ISSUE,
-        Theme.POSITIVE_EXPERIENCE,
     },
     Category.SUPPORT_EXPERIENCE: {
         Theme.SLOW_RESPONSE,
@@ -125,8 +133,23 @@ CATEGORY_THEMES: dict[Category, set[Theme]] = {
         Theme.ISSUE_UNRESOLVED,
         Theme.DIFFICULT_TO_REACH_SUPPORT,
     },
+    Category.SECURITY: {
+        Theme.UNAUTHORIZED_ACCESS,
+        Theme.DATA_PRIVACY_CONCERN,
+        Theme.SUSPICIOUS_ACTIVITY,
+        Theme.VULNERABILITY_REPORT,
+        Theme.PHISHING_SCAM_REPORT,
+    },
     Category.OTHER: {
         Theme.GENERAL_FEEDBACK,
         Theme.UNCLEAR,
+        Theme.REQUIRES_HUMAN_REVIEW,
     },
 }
+
+# Themes valid under ANY category — not looked up in CATEGORY_THEMES at all.
+# Positive Feedback is the one deliberate break from "themes are category-owned"
+# (Loom_Source_of_Truth.md, Category-Owned Themes). The theme-in-category
+# validator (schemas/models.py) must special-case these before consulting
+# CATEGORY_THEMES.
+UNIVERSAL_THEMES: set[Theme] = {Theme.POSITIVE_FEEDBACK}
