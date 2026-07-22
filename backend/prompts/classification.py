@@ -14,6 +14,57 @@ CATEGORY_PERF_FUNCTIONAL_BOUNDARY = (
     "pair most often confused — keep the boundary sharp."
 )
 
+BROKEN_ELEMENT_DOMAIN_BOUNDARY = (
+    "A ticket describing one specific interactive element that fails "
+    "(a button does nothing, a field won't submit, a link is unclickable) "
+    "is Functional Issues / Function Not Working by default. EXCEPTION: if "
+    "the broken element's function is itself a domain-owned action — "
+    "logging in, resetting a password, editing a profile field, completing "
+    "a payment — the domain category wins instead (Account & Access, "
+    "Billing & Payments, etc.), because the ticket is fundamentally about "
+    "that domain failing, not a generic UI malfunction. Do not classify a "
+    "broken element as Usability & User Experience merely because it is "
+    "visually a 'UI' problem — Usability & User Experience themes (Poor "
+    "Layout, Confusing Navigation, Hard to Find Feature) are about design "
+    "quality and discoverability, not a literal malfunction. A second "
+    "exception, same logic: if the element's malfunction itself IS a "
+    "security exposure — a form accepting input it should reject (e.g. "
+    "logging in with a blank/wrong password), one user seeing another "
+    "user's data, an input field executing injected code — that is "
+    "Security (Vulnerability Report, or Unauthorized Access / Data Privacy "
+    "Concern if a breach already happened), not Functional Issues or the "
+    "affected domain category. The signal: does the malfunction let "
+    "someone bypass a control or access something they should not — if "
+    "so, it is a security exposure regardless of which element broke."
+)
+
+PRIMARY_ISSUE_IS_THE_TRIGGER = (
+    "The primary issue is whatever actually happened — the real event or "
+    "problem the ticket reports — not whichever domain word appears in the "
+    "sentence, and not whichever sub-issue is described in the most detail "
+    "or with the most words. A ticket that says 'it froze mid-payment' is "
+    "about a freeze (Performance & Reliability), not a payment failure, "
+    "even though 'payment' is the word present — nothing about the "
+    "transaction itself is reported as wrong. On a long ticket describing "
+    "several problems, the primary issue is the one the customer is "
+    "fundamentally writing about — often the reason stated for their "
+    "frustration or their intent to act (e.g. cancel, escalate) — not "
+    "simply the first or most elaborated sub-issue in the text."
+)
+
+SUPPORT_EXPERIENCE_THEME_BOUNDARY = (
+    "Within Support Experience, distinguish by what the complaint is "
+    "actually about: Slow Response = the complaint is the wait itself (no "
+    "reply yet, or a long time to first reply) — nothing else about the "
+    "interaction is described as bad. Unhelpful Agent = a reply happened "
+    "but the agent/process was dismissive, transferred the customer "
+    "around, or gave no real help. Issue Unresolved = support engaged "
+    "reasonably but the underlying problem is still broken afterward. If a "
+    "ticket only describes waiting with no other complaint, it is Slow "
+    "Response — do not upgrade it to Issue Unresolved just because the "
+    "customer is frustrated."
+)
+
 
 def _render_taxonomy() -> str:
     lines = []
@@ -51,10 +102,12 @@ Experience; etc.), then use the cross-category Positive Feedback theme. Use \
 Other only when the praise has no identifiable topic (e.g. "great product, \
 thanks!"). Never default to Other just because the theme is Positive Feedback.
 4. {CATEGORY_PERF_FUNCTIONAL_BOUNDARY}
-5. Determine the dominant overall sentiment for the whole ticket: Positive, \
+5. {BROKEN_ELEMENT_DOMAIN_BOUNDARY}
+6. {SUPPORT_EXPERIENCE_THEME_BOUNDARY}
+7. Determine the dominant overall sentiment for the whole ticket: Positive, \
 Neutral, or Negative. There is no Mixed value — if the ticket has both \
 praise and complaint, pick whichever dominates.
-6. Determine a ticket-level sentiment_score: a float in [-1.0, +1.0] at \
+8. Determine a ticket-level sentiment_score: a float in [-1.0, +1.0] at \
 one-decimal precision. Its sign must agree with the sentiment label:
    - Positive: score strictly greater than 0, up to and including +1.0.
    - Neutral: score between -0.5 and +0.5, inclusive.
@@ -66,22 +119,22 @@ score should reflect the mild negative lean rather than sitting at dead \
 center.
    Do not compute this from any statistic — it is your own judgment of this \
 one ticket, not an aggregate.
-7. Determine urgency by impact, not tone:
+9. Determine urgency by impact, not tone:
    - High: blocks core functionality (severe outage, payment failure, \
 security/access issue).
    - Medium: an important issue with a workaround or limited impact.
    - Low: minor inconvenience, cosmetic issue, suggestion, or praise.
    A calmly worded "I can't log in at all" is High; an angry complaint about \
 button color is Low.
-8. Determine actionable: true if the ticket requires follow-up by product, \
+10. Determine actionable: true if the ticket requires follow-up by product, \
 engineering, support, or a business team; false for praise or purely \
 informational feedback with nothing to act on.
-9. If the ticket raises more than one distinct issue, identify all of them. \
-Return the most significant as the primary issue with full enrichment. \
-Return every other issue in additional_issues with only its category, \
-theme, and urgency (no sentiment, no sentiment_score — both are whole-ticket \
-properties).
-10. Return valid JSON only, matching the required schema exactly. No prose, \
+11. If the ticket raises more than one distinct issue, identify all of them. \
+{PRIMARY_ISSUE_IS_THE_TRIGGER} Return the most significant (by that \
+definition) as the primary issue with full enrichment. Return every other \
+issue in additional_issues with only its category, theme, and urgency (no \
+sentiment, no sentiment_score — both are whole-ticket properties).
+12. Return valid JSON only, matching the required schema exactly. No prose, \
 no markdown fences, no explanation.
 """
 

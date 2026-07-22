@@ -282,6 +282,8 @@ A ticket may contain more than one issue. This is handled in the **single classi
 
 **Data model note:** the output is structured to allow multiple issues from day one. First release aggregates on the primary; promoting additional issues into headline analytics later is a scope expansion, not a schema rewrite. When that expansion happens, the denominator shifts from *tickets* to *issues* and the dashboard must state which it is counting.
 
+**Known limitation — dense multi-issue tickets.** On a long ticket bundling several genuinely distinct problems (e.g. a login failure, incorrect data, a broken export, and unresponsive support all in one message), primary-issue selection is an inherent judgment call — reasonable readers, human or model, can disagree on which of several real problems is "the" primary one. Instruction 11's guidance (primary = what the customer is fundamentally writing about, not the most-detailed or first-mentioned sub-issue) narrows this but does not eliminate it on the densest cases. Expect occasional model/hand-labeled-key disagreement here specifically — it reflects genuine ambiguity in the input, not a classification defect.
+
 ---
 
 ## LLM Contract
