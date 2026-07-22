@@ -14,6 +14,7 @@ class ValidationReportOut(BaseModel):
     processed: int
     skipped: int
     skip_reasons: dict[str, int]
+    fell_back_count: int
 
 
 class AnalyzeResponse(BaseModel):

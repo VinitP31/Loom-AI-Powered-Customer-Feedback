@@ -14,7 +14,7 @@ import pandas as pd  # noqa: E402
 
 from analytics.aggregate import compute_analytics  # noqa: E402
 from pipeline.classify import classify_batch  # noqa: E402
-from pipeline.preprocess import clean_and_redact  # noqa: E402
+from pipeline.preprocess import clean_and_redact, is_long_ticket  # noqa: E402
 from pipeline.summarize import generate_executive_summary, maybe_summarize  # noqa: E402
 from pipeline.validate import FileValidationError, validate_csv  # noqa: E402
 from services.llm_client import LLMClient  # noqa: E402
@@ -31,7 +31,7 @@ def run(csv_path: Path) -> None:
 
     df = pd.read_csv(csv_path)
     try:
-        report = validate_csv(df, config.long_ticket_word_limit)
+        report = validate_csv(df)
     except FileValidationError as exc:
         print(f"REJECTED [{exc.code}]: {exc.message}")
         sys.exit(1)
@@ -44,14 +44,19 @@ def run(csv_path: Path) -> None:
     prepared = []
     for row in report.valid_rows:
         cleaned = clean_and_redact(row.original_text)
+        # Single word-count measurement (on cleaned text) drives both the
+        # long_ticket warning and the summarization-routing decision.
+        if is_long_ticket(cleaned, config.long_ticket_word_limit):
+            row.warnings.append("long_ticket")
         text_to_classify, was_summarized = maybe_summarize(
-            row.ticket_id, cleaned, config.long_ticket_word_limit, llm_client
+            row.ticket_id, cleaned, "long_ticket" in row.warnings, llm_client
         )
-        prepared.append((row.ticket_id, text_to_classify, was_summarized, row.warnings))
+        prepared.append((row.ticket_id, text_to_classify, cleaned, was_summarized, row.warnings))
 
     start = time.perf_counter()
     classifications = classify_batch(
-        [(ticket_id, text) for ticket_id, text, _, _ in prepared],
+        [(ticket_id, text, feedback_text, was_summarized)
+         for ticket_id, text, feedback_text, was_summarized, _ in prepared],
         llm_client,
         batch_size=config.batch_size,
         max_concurrency=config.max_concurrency,
@@ -60,16 +65,17 @@ def run(csv_path: Path) -> None:
 
     by_id = {c.ticket_id: c for c in classifications}
     print("=== Per-ticket classification ===")
-    for ticket_id, _text, was_summarized, warnings in prepared:
+    for ticket_id, _text, _feedback_text, was_summarized, warnings in prepared:
         c = by_id[ticket_id]
         flags = (["summarized"] if was_summarized else []) + warnings
         flag_str = f" [{', '.join(flags)}]" if flags else ""
         print(f"{ticket_id}{flag_str}")
-        print(f"  category:   {c.primary_category.value}")
-        print(f"  theme:      {c.primary_theme.value}")
-        print(f"  sentiment:  {c.sentiment.value}")
-        print(f"  urgency:    {c.urgency.value}")
-        print(f"  actionable: {c.actionable}")
+        print(f"  category:        {c.primary_category.value}")
+        print(f"  theme:           {c.primary_theme.value}")
+        print(f"  sentiment:       {c.sentiment.value}")
+        print(f"  sentiment_score: {c.sentiment_score}")
+        print(f"  urgency:         {c.urgency.value}")
+        print(f"  actionable:      {c.actionable}")
         for issue in c.additional_issues:
             print(f"  + additional: {issue.category.value} / {issue.theme.value} (urgency={issue.urgency.value})")
         print()

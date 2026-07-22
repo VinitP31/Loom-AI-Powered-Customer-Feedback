@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, UploadFile
 from analytics.aggregate import compute_analytics
 from api.response_models import AnalyzeResponse, ValidationReportOut
 from pipeline.classify import classify_batch
-from pipeline.preprocess import clean_and_redact
+from pipeline.preprocess import clean_and_redact, is_long_ticket
 from pipeline.summarize import generate_executive_summary, maybe_summarize
 from pipeline.validate import FileValidationError, validate_csv
 from services.llm_client import LLMClient
@@ -45,7 +45,7 @@ async def analyze(file: UploadFile) -> AnalyzeResponse:
         ) from exc
 
     try:
-        report = validate_csv(df, config.long_ticket_word_limit)
+        report = validate_csv(df)
     except FileValidationError as exc:
         raise HTTPException(
             status_code=400, detail={"error_code": exc.code, "message": exc.message}
@@ -55,13 +55,17 @@ async def analyze(file: UploadFile) -> AnalyzeResponse:
         model=config.llm_model, api_key=config.api_key, timeout=config.request_timeout
     )
 
-    prepared: list[tuple[str, str]] = []
+    prepared: list[tuple[str, str, str, bool]] = []
     for row in report.valid_rows:
         cleaned = clean_and_redact(row.original_text)
-        text_to_classify, _was_summarized = maybe_summarize(
-            row.ticket_id, cleaned, config.long_ticket_word_limit, llm_client
+        # Single word-count measurement (on cleaned text) drives both the
+        # long_ticket warning and the summarization-routing decision.
+        if is_long_ticket(cleaned, config.long_ticket_word_limit):
+            row.warnings.append("long_ticket")
+        text_to_classify, was_summarized = maybe_summarize(
+            row.ticket_id, cleaned, "long_ticket" in row.warnings, llm_client
         )
-        prepared.append((row.ticket_id, text_to_classify))
+        prepared.append((row.ticket_id, text_to_classify, cleaned, was_summarized))
 
     classifications = classify_batch(
         prepared, llm_client, batch_size=config.batch_size, max_concurrency=config.max_concurrency
@@ -76,6 +80,7 @@ async def analyze(file: UploadFile) -> AnalyzeResponse:
             processed=report.processed,
             skipped=report.skipped,
             skip_reasons=report.skip_reasons,
+            fell_back_count=facts["fell_back_count"],
         ),
         items=classifications,
         analytics=facts,
