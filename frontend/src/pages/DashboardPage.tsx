@@ -21,6 +21,12 @@ export default function DashboardPage() {
 
       <UploadPanel status={status} fileName={fileName} onFile={analyze} />
 
+      {status === "loading" && (
+        <div className="mt-4 h-1 w-full overflow-hidden rounded-full bg-surface-2">
+          <div className="loading-bar-fill h-full w-1/3 rounded-full bg-accent" />
+        </div>
+      )}
+
       {status === "error" && (
         <div className="mt-4 rounded-lg border border-critical/30 bg-critical/5 px-4 py-3 text-sm text-ink">
           {error}
