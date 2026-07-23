@@ -7,6 +7,7 @@ import ThemeFrequencyChart from "../components/charts/ThemeFrequencyChart";
 import SentimentDistributionChart from "../components/charts/SentimentDistributionChart";
 import UrgencyBreakdownChart from "../components/charts/UrgencyBreakdownChart";
 import SummaryPanel from "../components/SummaryPanel";
+import FeedbackExplorer from "../components/FeedbackExplorer";
 
 export default function DashboardPage() {
   const { status, data, error, fileName, analyze } = useAnalyze();
@@ -37,6 +38,7 @@ export default function DashboardPage() {
             <UrgencyBreakdownChart analytics={data.analytics} />
           </div>
           <SummaryPanel summary={data.summary} />
+          <FeedbackExplorer items={data.items} />
         </div>
       )}
     </main>

@@ -45,6 +45,19 @@ describe("DashboardPage", () => {
     expect(url).toContain("/analyze");
     expect(init.method).toBe("POST");
     expect(init.body).toBeInstanceOf(FormData);
+
+    // FeedbackExplorer: all 3 tickets render.
+    expect(screen.getByText("Great job on the new dashboard redesign, much easier to use now!")).toBeInTheDocument();
+
+    // Search narrows the table to the matching ticket only.
+    await userEvent.type(screen.getByPlaceholderText(/search feedback text/i), "camera");
+    expect(screen.getByText("App keeps crashing every time I open the camera screen.")).toBeInTheDocument();
+    expect(screen.queryByText("Great job on the new dashboard redesign, much easier to use now!")).not.toBeInTheDocument();
+    await userEvent.clear(screen.getByPlaceholderText(/search feedback text/i));
+
+    // Expanding a row with no additional_issues shows the "none" message.
+    await userEvent.click(screen.getByText("App keeps crashing every time I open the camera screen."));
+    expect(screen.getByText("No additional issues on this ticket.")).toBeInTheDocument();
   });
 
   it("shows a readable error when the backend rejects the file", async () => {
