@@ -33,3 +33,19 @@ globalThis.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserv
 // jsdom doesn't implement scrollIntoView (used when a chart click scrolls
 // the table into view).
 Element.prototype.scrollIntoView = Element.prototype.scrollIntoView ?? (() => {});
+
+// jsdom doesn't implement matchMedia at all (used for the dark-mode
+// toggle's system-preference default and prefers-reduced-motion checks).
+window.matchMedia =
+  window.matchMedia ??
+  ((query: string) =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList);

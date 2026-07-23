@@ -25,6 +25,54 @@
   color-scheme: light;
 }
 
+/* Dark theme — same token names, redefined. Tailwind utilities (bg-surface,
+   text-ink, ...) reference these custom properties, so overriding them here
+   re-themes every component with no per-component dark: variants needed.
+   System preference by default; the theme toggle stamps data-theme to
+   override in either direction, matching the frozen Structured Data
+   Studio design (see the archived studio-full.html artifact). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-background: #0b0e14;
+    --color-surface: #12161f;
+    --color-surface-2: #171c27;
+    --color-ink: #eef1f6;
+    --color-ink-2: #b7c0cc;
+    --color-ink-muted: #7b8494;
+    --color-hairline: #232935;
+    --color-accent: #6a6fd6;
+    --color-accent-ink: #05070c;
+    --color-critical: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-background: #0b0e14;
+  --color-surface: #12161f;
+  --color-surface-2: #171c27;
+  --color-ink: #eef1f6;
+  --color-ink-2: #b7c0cc;
+  --color-ink-muted: #7b8494;
+  --color-hairline: #232935;
+  --color-accent: #6a6fd6;
+  --color-accent-ink: #05070c;
+  --color-critical: #e66767;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-background: #f4f6f9;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef1f6;
+  --color-ink: #0b0f19;
+  --color-ink-2: #4b5563;
+  --color-ink-muted: #8b93a1;
+  --color-hairline: #e2e7ee;
+  --color-accent: #3b3fa0;
+  --color-accent-ink: #ffffff;
+  --color-critical: #d03b3b;
+}
+
 body {
   margin: 0;
   background: var(--color-background);
@@ -52,6 +100,45 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .loading-bar-fill {
+    animation: none;
+  }
+}
+
+@keyframes ambient-eq {
+  0%, 100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.ambient-eq-bar {
+  transform-origin: bottom;
+  animation: ambient-eq 1.1s ease-in-out infinite;
+}
+
+@keyframes ambient-cycle-fade {
+  0%, 8% {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  18%, 82% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  92%, 100% {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+.ambient-cycle-text {
+  display: inline-block;
+  animation: ambient-cycle-fade 2.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-eq-bar,
+  .ambient-cycle-text {
     animation: none;
   }
 }

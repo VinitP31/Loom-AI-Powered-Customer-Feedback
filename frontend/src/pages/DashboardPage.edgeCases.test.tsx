@@ -6,7 +6,7 @@ import { allOneCategoryResponseFixture } from "../test/fixtures/allOneCategoryRe
 
 async function uploadFile(fileName: string) {
   const file = new File(["id,feedback\n1,test"], fileName, { type: "text/csv" });
-  const input = screen.getByLabelText(/choose file/i, { selector: "input" }) as HTMLInputElement;
+  const input = screen.getByLabelText(/upload file/i, { selector: "input" }) as HTMLInputElement;
   await userEvent.upload(input, file);
 }
 

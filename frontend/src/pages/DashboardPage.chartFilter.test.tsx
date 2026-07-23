@@ -15,7 +15,7 @@ import { analyzeResponseFixture } from "../test/fixtures/analyzeResponse.fixture
 
 async function uploadFile() {
   const file = new File(["id,feedback\n1,test"], "mini_test.csv", { type: "text/csv" });
-  const input = screen.getByLabelText(/choose file/i, { selector: "input" }) as HTMLInputElement;
+  const input = screen.getByLabelText(/upload file/i, { selector: "input" }) as HTMLInputElement;
   await userEvent.upload(input, file);
 }
 
