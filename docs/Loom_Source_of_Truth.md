@@ -608,6 +608,7 @@ Each is a clean extension that does not require reworking the AI pipeline.
 | Chunking for extremely large tickets | Beyond the summarization threshold; build if inputs regularly exceed summarization limits. |
 | Aspect-based sentiment | Correct answer for mixed-sentiment tickets (sentiment per issue). Scoped out; dominant sentiment used instead. |
 | Human review workflow | For low-confidence classifications; build when a confidence signal is added. |
+| API rate limiting | `/analyze` has no request-level throttling — a single caller can currently trigger unbounded concurrent batches, each making real LLM calls. `MAX_CONCURRENCY` bounds in-flight calls *within* one request, but nothing bounds *how many requests* can run at once. Fine for local/demo use with no public exposure; add per-client rate limiting (e.g. `slowapi`, or a gateway-level limit) before any public or multi-tenant deployment, to protect both cost and provider quota. |
 
 ---
 
