@@ -62,17 +62,15 @@ export default function KpiCards({ analytics: a, validationReport: v }: KpiCards
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
       {kpis.map((kpi) => (
-        <div key={kpi.label} className="rounded-lg border border-hairline bg-surface px-4 py-3">
-          <p className="text-[11px] font-medium text-ink-muted">{kpi.label}</p>
-          <p className={`mt-1.5 text-xl font-bold ${kpi.tone ? TONE_CLASS[kpi.tone] : "text-ink"}`}>
-            {kpi.value}
-          </p>
+        <div key={kpi.label} className="rounded-lg border border-hairline bg-surface px-3 py-2">
+          <p className="text-[10.5px] font-medium text-ink-muted">{kpi.label}</p>
+          <p className={`mt-1 text-lg font-bold ${kpi.tone ? TONE_CLASS[kpi.tone] : "text-ink"}`}>{kpi.value}</p>
           {kpi.tieList ? (
-            <p className="mt-1 text-[11px] leading-snug text-ink-2">Tied: {kpi.tieList.join(", ")}</p>
+            <p className="mt-0.5 text-[10.5px] leading-snug text-ink-2">Tied: {kpi.tieList.join(", ")}</p>
           ) : (
-            kpi.sub && <p className="mt-1 text-[11px] text-ink-muted">{kpi.sub}</p>
+            kpi.sub && <p className="mt-0.5 text-[10.5px] text-ink-muted">{kpi.sub}</p>
           )}
         </div>
       ))}

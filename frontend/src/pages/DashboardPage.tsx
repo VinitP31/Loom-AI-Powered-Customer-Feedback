@@ -48,7 +48,7 @@ export default function DashboardPage() {
     <div>
       <Nav status={status} onFile={handleFile} />
 
-      <main className="mx-auto max-w-6xl px-6 pb-8">
+      <main className="mx-auto max-w-[1400px] px-6 pb-8">
         <AmbientStatus status={status} fileName={fileName} onFile={handleFile} />
 
         {status === "loading" && (
@@ -75,31 +75,37 @@ export default function DashboardPage() {
         )}
 
         {status === "success" && data && (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3">
             <ValidationBanner report={data.validation_report} />
-            <KpiCards analytics={data.analytics} validationReport={data.validation_report} />
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <CategoryDistributionChart
-                analytics={data.analytics}
-                activeCategory={activeCategory === "All" ? null : activeCategory}
-                onCategoryClick={handleCategoryClick}
-              />
-              <ThemeFrequencyChart
-                analytics={data.analytics}
-                activeTheme={activeTheme === "All" ? null : activeTheme}
-                onThemeClick={handleThemeClick}
-              />
-              <SentimentDistributionChart analytics={data.analytics} />
-              <UrgencyBreakdownChart analytics={data.analytics} />
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start">
+              <div className="flex flex-col gap-3">
+                <KpiCards analytics={data.analytics} validationReport={data.validation_report} />
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  <CategoryDistributionChart
+                    analytics={data.analytics}
+                    activeCategory={activeCategory === "All" ? null : activeCategory}
+                    onCategoryClick={handleCategoryClick}
+                  />
+                  <ThemeFrequencyChart
+                    analytics={data.analytics}
+                    activeTheme={activeTheme === "All" ? null : activeTheme}
+                    onThemeClick={handleThemeClick}
+                  />
+                  <SentimentDistributionChart analytics={data.analytics} />
+                  <UrgencyBreakdownChart analytics={data.analytics} />
+                </div>
+                <FeedbackExplorer
+                  items={data.items}
+                  categoryFilter={activeCategory}
+                  onCategoryFilterChange={setActiveCategory}
+                  themeFilter={activeTheme}
+                  onThemeFilterChange={setActiveTheme}
+                />
+              </div>
+              <div className="lg:sticky lg:top-4">
+                <SummaryPanel summary={data.summary} />
+              </div>
             </div>
-            <SummaryPanel summary={data.summary} />
-            <FeedbackExplorer
-              items={data.items}
-              categoryFilter={activeCategory}
-              onCategoryFilterChange={setActiveCategory}
-              themeFilter={activeTheme}
-              onThemeFilterChange={setActiveTheme}
-            />
           </div>
         )}
       </main>

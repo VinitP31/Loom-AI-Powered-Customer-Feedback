@@ -62,16 +62,16 @@ export default function DistributionBarChart({
   onBarClick,
 }: DistributionBarChartProps) {
   const sorted = [...rows].sort((a, b) => b.value - a.value);
-  const height = Math.max(sorted.length * 32, 80);
+  const height = Math.max(sorted.length * 23, 64);
   const clickable = Boolean(onBarClick);
 
   return (
-    <div className="rounded-lg border border-hairline bg-surface p-4">
+    <div className="rounded-lg border border-hairline bg-surface p-3">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold text-ink">{title}</h3>
         {clickable && <span className="text-[10px] text-ink-muted">click a bar to filter the table</span>}
       </div>
-      <p className="mb-3 text-xs text-ink-muted">{sub}</p>
+      <p className="mb-2 text-xs text-ink-muted">{sub}</p>
       {sorted.length === 0 ? (
         <p className="py-6 text-center text-xs text-ink-muted">No data to show.</p>
       ) : (
