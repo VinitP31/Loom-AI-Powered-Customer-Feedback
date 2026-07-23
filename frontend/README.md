@@ -1,32 +1,58 @@
-# React + TypeScript + Vite
+# Loom Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + TypeScript dashboard for Loom. Uploads a CSV, calls the backend's
+single `POST /analyze` endpoint once, and renders the returned payload —
+KPIs, distribution charts, an executive summary, and a searchable/sortable
+feedback table. No AI runs in the frontend; everything here is a read of
+data the backend already computed.
 
-Currently, two official plugins are available:
+## Setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+cp .env.example .env   # points at the local backend by default
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Run
+
+Start the backend first (see `backend/README.md`), then:
+
+```bash
+npm run dev
+```
+
+Open the printed local URL. Upload a CSV with a `feedback` column (an
+`id` column is optional).
+
+## Test
+
+```bash
+npm run build   # tsc type-check + production build
+npm test        # vitest — integration tests drive real component
+                # interactions (upload, search, filter, expand) against
+                # /analyze payloads captured from the live backend
+npm run lint    # oxlint
+```
+
+## Project structure
+
+```
+src/
+├── api/          # analyzeClient.ts — the one POST /analyze call
+├── hooks/        # useAnalyze() — request status + payload state
+├── types/        # taxonomy.ts + analyze.ts, mirroring the backend contract
+├── components/   # UploadPanel, KpiCards, ValidationBanner, SummaryPanel,
+│                 # FeedbackExplorer, charts/
+├── pages/        # DashboardPage — the single dashboard view
+├── utils/        # colors.ts — one category/sentiment/urgency color map,
+│                 # reused by every chart and the table
+└── test/         # vitest setup + fixtures captured from the live backend
+```
+
+See `frontend/CLAUDE.md` (gitignored, internal) for the full operational
+spec this was built against.
+
+## Configuration
+
+`VITE_API_BASE_URL` (`.env`) — base URL of the backend. Defaults to
+`http://127.0.0.1:8000`, matching `backend/README.md`'s local dev setup.
