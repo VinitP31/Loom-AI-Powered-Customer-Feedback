@@ -5,7 +5,7 @@ import DashboardPage from "./DashboardPage";
 import { analyzeResponseFixture } from "../test/fixtures/analyzeResponse.fixture";
 
 describe("DashboardPage", () => {
-  it("uploads a CSV and renders the processed/skipped counts from a real /analyze payload", async () => {
+  it("uploads a CSV and renders the validation banner + KPIs from a real /analyze payload", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -21,8 +21,15 @@ describe("DashboardPage", () => {
     await userEvent.upload(input, file);
 
     await waitFor(() => {
-      expect(screen.getByText(/processed 3 of 4 rows \(1 skipped\)/i)).toBeInTheDocument();
+      expect(screen.getByText("3", { selector: "strong" })).toBeInTheDocument();
     });
+
+    // ValidationBanner: total/processed/skipped + skip reason.
+    expect(screen.getByText(/empty or null feedback/i)).toBeInTheDocument();
+    // KpiCards: tie handling on top_category/top_theme (no single leader in the fixture).
+    expect(screen.getAllByText(/tied:/i).length).toBe(2);
+    // KpiCards: backend-computed processing_success_rate rendered verbatim.
+    expect(screen.getByText("75.0%")).toBeInTheDocument();
 
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];

@@ -1,5 +1,7 @@
 import { useAnalyze } from "../hooks/useAnalyze";
 import UploadPanel from "../components/UploadPanel";
+import ValidationBanner from "../components/ValidationBanner";
+import KpiCards from "../components/KpiCards";
 
 export default function DashboardPage() {
   const { status, data, error, fileName, analyze } = useAnalyze();
@@ -20,10 +22,10 @@ export default function DashboardPage() {
       )}
 
       {status === "success" && data && (
-        <p className="mt-4 text-sm text-ink-2">
-          Processed {data.validation_report.processed} of {data.validation_report.total_rows}{" "}
-          rows ({data.validation_report.skipped} skipped).
-        </p>
+        <div className="mt-5 flex flex-col gap-4">
+          <ValidationBanner report={data.validation_report} />
+          <KpiCards analytics={data.analytics} validationReport={data.validation_report} />
+        </div>
       )}
     </main>
   );
