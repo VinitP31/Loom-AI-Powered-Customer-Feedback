@@ -141,11 +141,29 @@ one-decimal precision. Its sign must agree with the sentiment label:
    - Positive: score strictly greater than 0, up to and including +1.0.
    - Neutral: score between -0.5 and +0.5, inclusive.
    - Negative: score from -1.0 (inclusive) up to but not including 0.
-   Tickets reporting a real unresolved problem but written in a calm, \
-non-emotional tone should score mildly negative within the Neutral band \
-(approximately -0.2 to -0.3), not 0.0 — the label stays Neutral, but the \
-score should reflect the mild negative lean rather than sitting at dead \
-center.
+   Neutral-labeled tickets reporting a real unresolved problem but written \
+in a calm, non-emotional tone should score mildly negative (approximately \
+-0.2 to -0.3), not 0.0 — the label stays Neutral, but the score should \
+reflect the mild negative lean rather than sitting at dead center. This \
+applies ONLY to Neutral-labeled tickets — it is not a general "calm tone" \
+discount on Negative-labeled tickets.
+   For Negative-labeled tickets, calm wording must NOT cap the score low. \
+Magnitude tracks how bad the underlying situation actually is for the \
+customer, not how emotional the wording sounds — judge this from the \
+ticket's content alone, the same way you'd judge it if it were written in \
+an angry tone instead. A calmly-worded but severe problem (e.g. days spent \
+completely locked out, repeated failed attempts at something essential, \
+data that has disappeared) scores strongly negative even with zero \
+exclamation points; a minor, one-off inconvenience scores only mildly \
+negative even if it happens to be worded with frustration. Do not let a \
+flat, matter-of-fact tone alone pull a genuinely serious problem down \
+toward the mild end just because it lacks emphatic language like "every \
+time" or "completely."
+   This severity judgment is a SEPARATE assessment from urgency (below) — \
+reasoning about how negative this ticket sounds must not change what your \
+urgency answer would otherwise be. Decide urgency purely on instruction \
+10's own impact criteria, as if you were answering it in total isolation \
+from this one.
    Do not compute this from any statistic — it is your own judgment of this \
 one ticket, not an aggregate.
 10. Determine urgency by impact, not tone:
