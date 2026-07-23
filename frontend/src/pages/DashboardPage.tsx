@@ -2,6 +2,10 @@ import { useAnalyze } from "../hooks/useAnalyze";
 import UploadPanel from "../components/UploadPanel";
 import ValidationBanner from "../components/ValidationBanner";
 import KpiCards from "../components/KpiCards";
+import CategoryDistributionChart from "../components/charts/CategoryDistributionChart";
+import ThemeFrequencyChart from "../components/charts/ThemeFrequencyChart";
+import SentimentDistributionChart from "../components/charts/SentimentDistributionChart";
+import UrgencyBreakdownChart from "../components/charts/UrgencyBreakdownChart";
 
 export default function DashboardPage() {
   const { status, data, error, fileName, analyze } = useAnalyze();
@@ -25,6 +29,12 @@ export default function DashboardPage() {
         <div className="mt-5 flex flex-col gap-4">
           <ValidationBanner report={data.validation_report} />
           <KpiCards analytics={data.analytics} validationReport={data.validation_report} />
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <CategoryDistributionChart analytics={data.analytics} />
+            <ThemeFrequencyChart analytics={data.analytics} />
+            <SentimentDistributionChart analytics={data.analytics} />
+            <UrgencyBreakdownChart analytics={data.analytics} />
+          </div>
         </div>
       )}
     </main>

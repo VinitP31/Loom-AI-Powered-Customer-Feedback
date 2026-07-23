@@ -31,6 +31,12 @@ describe("DashboardPage", () => {
     // KpiCards: backend-computed processing_success_rate rendered verbatim.
     expect(screen.getByText("75.0%")).toBeInTheDocument();
 
+    // All four charts mount without crashing and carry a self-explanatory title.
+    expect(screen.getByText("Category Distribution")).toBeInTheDocument();
+    expect(screen.getByText("Top Themes")).toBeInTheDocument();
+    expect(screen.getByText("Sentiment Split")).toBeInTheDocument();
+    expect(screen.getByText("Urgency Breakdown")).toBeInTheDocument();
+
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toContain("/analyze");
