@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+/* Design tokens for the Loom dashboard, exposed as Tailwind utilities
+   (bg-background, text-ink, etc.) via @theme. Kept semantic — components
+   never reach for raw hex values. */
+@theme {
+  --color-background: #f4f6f9;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef1f6;
+  --color-ink: #0b0f19;
+  --color-ink-2: #4b5563;
+  --color-ink-muted: #8b93a1;
+  --color-hairline: #e2e7ee;
+  --color-accent: #3b3fa0;
+  --color-accent-ink: #ffffff;
+
+  /* Semantic status colors — reserved for state, never reused as a
+     categorical series color (see utils/colors.ts). */
+  --color-good: #0ca30c;
+  --color-warning: #b3790f;
+  --color-critical: #d03b3b;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: var(--color-background);
+  color: var(--color-ink);
+  font-family: "Segoe UI", system-ui, Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+#root {
+  min-height: 100svh;
+}
