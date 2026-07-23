@@ -79,6 +79,27 @@ There is exactly one endpoint: `POST /analyze`. The system is stateless — no d
 
 ---
 
+## Tests
+
+```bash
+pytest
+```
+
+48 tests, no real LLM calls, no API key needed to run them — every test that would otherwise touch the network gets a `FakeLLMClient` (`tests/conftest.py`) instead, a duck-typed stand-in exposing the same `structured_call`/`text_call` surface as the real `LLMClient`, configured per-test with canned responses. `LLM_MODEL`/`API_KEY` are still set to dummy values by an autouse fixture, since `utils/config.py` and `LLMClient.__init__` read them unconditionally — they're never actually sent anywhere in a test run.
+
+| File | Covers |
+|---|---|
+| `test_validate.py` | File-level rejections (4001/4002/4003), row skip vs. reject, duplicate-flagging (2nd occurrence only), HTML/Markdown warnings |
+| `test_preprocess.py` | HTML/Markdown/whitespace normalization, PII redaction boundaries (email/phone/card/ID by digit count), the long-ticket word-count threshold |
+| `test_schemas.py` | theme-belongs-to-category validation, the `Positive Feedback` cross-category exception, `sentiment_score` sign-agreement band, the fallback shape |
+| `test_analytics.py` | Denominator rule (percentages against `processed`, success rate against `total_uploaded`), the tie contract (`top_category`/`top_theme` null + leaders list), `fell_back_count`, `additional_issues` excluded from headline distributions |
+| `test_classify.py` | The validate → coerce → re-prompt(×1) → fallback sequence: first-try success, recovery via the one guaranteed re-prompt, exhaustion falling back cleanly, a malformed/no-tool-call response going through the same path as a validation failure, and batch ticket-independence |
+| `test_api.py` | `POST /analyze` end-to-end through FastAPI's `TestClient` — file-level error responses and a full success-path response shape, with `LLMClient` monkeypatched |
+
+This deliberately isn't exhaustive coverage — it's a handful of tests per pipeline stage covering the scenarios `CLAUDE.md` calls out as load-bearing (the repair sequence, the tie contract, the denominator rule), not every possible input. Add to it as new edge cases turn up.
+
+---
+
 ## Input CSV Schema
 
 | Column | Required | Notes |
@@ -173,6 +194,7 @@ backend/
 ├── services/          # LLM client wrapper, typed errors
 ├── utils/             # config loading
 ├── data/              # sample/dev CSVs (git-ignored — not shipped)
+├── tests/             # pytest — see Tests below
 ├── cli.py             # run the pipeline over any CSV from the terminal
 └── main.py            # FastAPI app, CORS, request timing
 ```

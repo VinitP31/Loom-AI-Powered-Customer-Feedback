@@ -615,27 +615,32 @@ Each is a clean extension that does not require reworking the AI pipeline.
 
 ```text
 backend/
-├── api/                 HTTP endpoints and orchestration
+├── api/                 HTTP endpoints and orchestration (routes.py, response_models.py)
 ├── pipeline/
-│   ├── validate.py
+│   ├── validate.py      file + row validation (4001/4002/4003, skip/warn rules)
 │   ├── preprocess.py    normalization + PII redaction
 │   ├── classify.py      batch classification, validation, repair, fallback
-│   ├── summarize.py     long-ticket + executive summary prompts
-├── analytics/           deterministic KPI/aggregation
+│   └── summarize.py     long-ticket routing + executive summary
+├── analytics/           deterministic KPI/aggregation — no LLM import, ever
 ├── prompts/             prompt templates and output contracts
-├── schemas/             Pydantic models
-├── services/            LLM client, file handling
-├── utils/               shared helpers
-└── main.py
+├── schemas/             Pydantic models + canonical taxonomy (taxonomy.py)
+├── services/            LLM client wrapper, typed errors
+├── utils/               config loading
+├── data/                sample/dev CSVs (git-ignored, not shipped)
+├── tests/               pytest — one file per pipeline stage + an API-level suite
+├── cli.py               run the pipeline over any CSV from the terminal
+└── main.py              FastAPI app, CORS, request timing
 
 frontend/
-├── components/
-├── pages/
-├── hooks/
-├── api/
-├── types/
-├── utils/
-└── assets/
+├── src/
+│   ├── api/             analyzeClient.ts — the one POST /analyze call
+│   ├── hooks/           useAnalyze() — request status + payload state
+│   ├── types/           taxonomy.ts + analyze.ts, mirroring the backend contract
+│   ├── components/      Nav, AmbientStatus, IdleLanding, KpiCards, ValidationBanner,
+│   │                    SummaryPanel, FeedbackExplorer, charts/
+│   ├── pages/           DashboardPage — the single dashboard view
+│   ├── utils/           colors.ts — the one category/sentiment/urgency color map
+│   └── test/            vitest setup + fixtures captured from the live backend
 ```
 
 | Module | Responsibility |
@@ -647,6 +652,9 @@ frontend/
 | schemas | Pydantic models and validation |
 | services | External integrations (LLM, files) |
 | utils | Shared helpers |
+| tests | Backend pytest suite (48 tests) — validation, preprocessing, schema validators, analytics, the classification repair sequence, and the API endpoint, all without a real LLM call |
+
+For the exact, currently-accurate directory listing and what each file does, see `backend/README.md` and `frontend/README.md` — this section is the high-level shape; the two READMEs are the maintained source of truth for file-level detail.
 
 ---
 
