@@ -142,3 +142,14 @@ body {
     animation: none;
   }
 }
+
+/* Clicking a chart bar to filter (CategoryDistributionChart,
+   ThemeFrequencyChart) focuses the underlying SVG shape, and browsers
+   draw their own default focus rectangle on top of it — a thick black
+   box that has nothing to do with our own active-bar indicator (the
+   accent-colored stroke/ring already applied via Cell). Suppress the
+   default outline; the click already has clear visual feedback. */
+.recharts-wrapper svg,
+.recharts-wrapper svg :focus {
+  outline: none;
+}
