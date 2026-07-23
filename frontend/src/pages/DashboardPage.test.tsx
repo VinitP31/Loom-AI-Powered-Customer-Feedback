@@ -37,6 +37,9 @@ describe("DashboardPage", () => {
     expect(screen.getByText("Sentiment Split")).toBeInTheDocument();
     expect(screen.getByText("Urgency Breakdown")).toBeInTheDocument();
 
+    // SummaryPanel renders the backend's executive summary verbatim.
+    expect(screen.getByText(analyzeResponseFixture.summary)).toBeInTheDocument();
+
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toContain("/analyze");
