@@ -73,6 +73,26 @@ SUPPORT_EXPERIENCE_THEME_BOUNDARY = (
     "customer is frustrated."
 )
 
+VAGUENESS_BOUNDARY = (
+    "A ticket only belongs to a specific category (Billing & Payments, "
+    "Account & Access, Performance & Reliability, Functional Issues, "
+    "Feature Requests & Enhancements, Usability & User Experience, Support "
+    "Experience, Security) when it names or clearly implies WHAT is "
+    "failing, being requested, or being praised — a specific feature, "
+    "action, page, error, or interaction. Do not infer a specific "
+    "malfunction from vague dissatisfaction alone: 'not sure this is "
+    "working as I expected' names no feature or action, so it is NOT "
+    "evidence of a Functional Issue just because a word like 'working' "
+    "appears in it — guessing a specific category from wording alone, "
+    "without a named subject, is overconfident and wrong more often than "
+    "it is right. When no specific subject is identifiable, use Other "
+    "instead: General Feedback for a vague but readable comment (some "
+    "content is there, just not enough to categorize — e.g. 'idk what to "
+    "say, it's a product I guess'); Unclear for text with essentially no "
+    "interpretable content at all (a single word or filler like 'meh' or "
+    "'ok')."
+)
+
 
 def _render_taxonomy() -> str:
     lines = []
@@ -112,10 +132,11 @@ thanks!"). Never default to Other just because the theme is Positive Feedback.
 4. {CATEGORY_PERF_FUNCTIONAL_BOUNDARY}
 5. {BROKEN_ELEMENT_DOMAIN_BOUNDARY}
 6. {SUPPORT_EXPERIENCE_THEME_BOUNDARY}
-7. Determine the dominant overall sentiment for the whole ticket: Positive, \
+7. {VAGUENESS_BOUNDARY}
+8. Determine the dominant overall sentiment for the whole ticket: Positive, \
 Neutral, or Negative. There is no Mixed value — if the ticket has both \
 praise and complaint, pick whichever dominates.
-8. Determine a ticket-level sentiment_score: a float in [-1.0, +1.0] at \
+9. Determine a ticket-level sentiment_score: a float in [-1.0, +1.0] at \
 one-decimal precision. Its sign must agree with the sentiment label:
    - Positive: score strictly greater than 0, up to and including +1.0.
    - Neutral: score between -0.5 and +0.5, inclusive.
@@ -127,22 +148,22 @@ score should reflect the mild negative lean rather than sitting at dead \
 center.
    Do not compute this from any statistic — it is your own judgment of this \
 one ticket, not an aggregate.
-9. Determine urgency by impact, not tone:
+10. Determine urgency by impact, not tone:
    - High: blocks core functionality (severe outage, payment failure, \
 security/access issue).
    - Medium: an important issue with a workaround or limited impact.
    - Low: minor inconvenience, cosmetic issue, suggestion, or praise.
    A calmly worded "I can't log in at all" is High; an angry complaint about \
 button color is Low.
-10. Determine actionable: true if the ticket requires follow-up by product, \
+11. Determine actionable: true if the ticket requires follow-up by product, \
 engineering, support, or a business team; false for praise or purely \
 informational feedback with nothing to act on.
-11. If the ticket raises more than one distinct issue, identify all of them. \
+12. If the ticket raises more than one distinct issue, identify all of them. \
 {PRIMARY_ISSUE_IS_THE_TRIGGER} Return the most significant (by that \
 definition) as the primary issue with full enrichment. Return every other \
 issue in additional_issues with only its category, theme, and urgency (no \
 sentiment, no sentiment_score — both are whole-ticket properties).
-12. Return valid JSON only, matching the required schema exactly. No prose, \
+13. Return valid JSON only, matching the required schema exactly. No prose, \
 no markdown fences, no explanation.
 """
 
