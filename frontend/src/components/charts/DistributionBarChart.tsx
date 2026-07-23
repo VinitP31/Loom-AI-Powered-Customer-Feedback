@@ -23,6 +23,12 @@ interface DistributionBarChartProps {
   sub: string;
   rows: DistributionRow[];
   total: number;
+  /** When set, bars become clickable: clicking a bar calls this with its
+   * name (clicking the already-active bar clears the filter by passing
+   * null), and the active bar gets a visible ring so the filter state is
+   * legible without checking the table below. */
+  activeName?: string | null;
+  onBarClick?: (name: string | null) => void;
 }
 
 function ChartTooltip({
@@ -47,13 +53,24 @@ function ChartTooltip({
   );
 }
 
-export default function DistributionBarChart({ title, sub, rows, total }: DistributionBarChartProps) {
+export default function DistributionBarChart({
+  title,
+  sub,
+  rows,
+  total,
+  activeName,
+  onBarClick,
+}: DistributionBarChartProps) {
   const sorted = [...rows].sort((a, b) => b.value - a.value);
   const height = Math.max(sorted.length * 32, 80);
+  const clickable = Boolean(onBarClick);
 
   return (
     <div className="rounded-lg border border-hairline bg-surface p-4">
-      <h3 className="text-sm font-semibold text-ink">{title}</h3>
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold text-ink">{title}</h3>
+        {clickable && <span className="text-[10px] text-ink-muted">click a bar to filter the table</span>}
+      </div>
       <p className="mb-3 text-xs text-ink-muted">{sub}</p>
       {sorted.length === 0 ? (
         <p className="py-6 text-center text-xs text-ink-muted">No data to show.</p>
@@ -70,9 +87,29 @@ export default function DistributionBarChart({ title, sub, rows, total }: Distri
               tickLine={false}
             />
             <Tooltip content={<ChartTooltip total={total} />} cursor={{ fill: "var(--color-surface-2)" }} />
-            <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={16}>
+            <Bar
+              dataKey="value"
+              radius={[0, 4, 4, 0]}
+              maxBarSize={16}
+              isAnimationActive={false}
+              cursor={clickable ? "pointer" : undefined}
+              onClick={
+                onBarClick
+                  ? (row: unknown) => {
+                      const name = (row as DistributionRow).name;
+                      onBarClick(activeName === name ? null : name);
+                    }
+                  : undefined
+              }
+            >
               {sorted.map((row) => (
-                <Cell key={row.name} fill={row.color} />
+                <Cell
+                  key={row.name}
+                  fill={row.color}
+                  fillOpacity={activeName && activeName !== row.name ? 0.35 : 1}
+                  stroke={activeName === row.name ? "var(--color-accent)" : undefined}
+                  strokeWidth={activeName === row.name ? 2 : 0}
+                />
               ))}
               <LabelList
                 dataKey="value"

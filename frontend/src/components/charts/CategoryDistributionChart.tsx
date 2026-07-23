@@ -5,9 +5,15 @@ import DistributionBarChart from "./DistributionBarChart";
 
 interface CategoryDistributionChartProps {
   analytics: Analytics;
+  activeCategory?: Category | null;
+  onCategoryClick?: (category: Category | null) => void;
 }
 
-export default function CategoryDistributionChart({ analytics }: CategoryDistributionChartProps) {
+export default function CategoryDistributionChart({
+  analytics,
+  activeCategory,
+  onCategoryClick,
+}: CategoryDistributionChartProps) {
   const rows = Object.entries(analytics.category_distribution).map(([name, value]) => ({
     name,
     value: value ?? 0,
@@ -21,6 +27,8 @@ export default function CategoryDistributionChart({ analytics }: CategoryDistrib
       sub="Primary category of processed tickets"
       rows={rows}
       total={analytics.total_processed}
+      activeName={activeCategory}
+      onBarClick={onCategoryClick ? (name) => onCategoryClick(name as Category | null) : undefined}
     />
   );
 }

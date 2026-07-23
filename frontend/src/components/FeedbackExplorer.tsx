@@ -8,11 +8,18 @@
 
 import { Fragment, useMemo, useState } from "react";
 import type { TicketClassification } from "../types/analyze";
-import type { Category, Sentiment, Urgency } from "../types/taxonomy";
+import type { Category, Sentiment, Theme, Urgency } from "../types/taxonomy";
 import { CATEGORY_COLOR, SENTIMENT_COLOR, SENTIMENT_RANK, URGENCY_COLOR, URGENCY_RANK } from "../utils/colors";
 
 interface FeedbackExplorerProps {
   items: TicketClassification[];
+  /** Controlled by DashboardPage so a click on the category/theme charts
+   * filters this table directly — "if I click Billing on the chart, I
+   * want to see only Billing tickets here." */
+  categoryFilter: Category | "All";
+  onCategoryFilterChange: (category: Category | "All") => void;
+  themeFilter: Theme | "All";
+  onThemeFilterChange: (theme: Theme | "All") => void;
 }
 
 type SortKey = "ticket_id" | "primary_category" | "primary_theme" | "sentiment" | "urgency" | "actionable";
@@ -20,9 +27,14 @@ type SortKey = "ticket_id" | "primary_category" | "primary_theme" | "sentiment" 
 const SENTIMENT_OPTIONS: Sentiment[] = ["Positive", "Neutral", "Negative"];
 const URGENCY_OPTIONS: Urgency[] = ["High", "Medium", "Low"];
 
-export default function FeedbackExplorer({ items }: FeedbackExplorerProps) {
+export default function FeedbackExplorer({
+  items,
+  categoryFilter,
+  onCategoryFilterChange,
+  themeFilter,
+  onThemeFilterChange,
+}: FeedbackExplorerProps) {
   const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<Category | "All">("All");
   const [sentimentFilter, setSentimentFilter] = useState<Sentiment | "All">("All");
   const [urgencyFilter, setUrgencyFilter] = useState<Urgency | "All">("All");
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
@@ -33,11 +45,13 @@ export default function FeedbackExplorer({ items }: FeedbackExplorerProps) {
     () => Array.from(new Set(items.map((i) => i.primary_category))).sort(),
     [items],
   );
+  const themes = useMemo(() => Array.from(new Set(items.map((i) => i.primary_theme))).sort(), [items]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let rows = items.filter((t) => {
       if (categoryFilter !== "All" && t.primary_category !== categoryFilter) return false;
+      if (themeFilter !== "All" && t.primary_theme !== themeFilter) return false;
       if (sentimentFilter !== "All" && t.sentiment !== sentimentFilter) return false;
       if (urgencyFilter !== "All" && t.urgency !== urgencyFilter) return false;
       if (q && !t.feedback_text.toLowerCase().includes(q)) return false;
@@ -67,7 +81,7 @@ export default function FeedbackExplorer({ items }: FeedbackExplorerProps) {
       });
     }
     return rows;
-  }, [items, search, categoryFilter, sentimentFilter, urgencyFilter, sortKey, sortDir]);
+  }, [items, search, categoryFilter, themeFilter, sentimentFilter, urgencyFilter, sortKey, sortDir]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -92,8 +106,10 @@ export default function FeedbackExplorer({ items }: FeedbackExplorerProps) {
     return <span className="ml-1 text-accent">{sortDir === 1 ? "↑" : "↓"}</span>;
   }
 
+  const hasChartFilter = categoryFilter !== "All" || themeFilter !== "All";
+
   return (
-    <div className="rounded-lg border border-hairline bg-surface">
+    <div id="feedback-explorer" className="rounded-lg border border-hairline bg-surface">
       <div className="flex flex-wrap items-center gap-2 border-b border-hairline p-4">
         <h3 className="mr-auto text-sm font-semibold text-ink">Feedback Explorer</h3>
         <input
@@ -105,13 +121,25 @@ export default function FeedbackExplorer({ items }: FeedbackExplorerProps) {
         />
         <select
           value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value as Category | "All")}
+          onChange={(e) => onCategoryFilterChange(e.target.value as Category | "All")}
           className="rounded-md border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink"
         >
           <option value="All">All categories</option>
           {categories.map((c) => (
             <option key={c} value={c}>
               {c}
+            </option>
+          ))}
+        </select>
+        <select
+          value={themeFilter}
+          onChange={(e) => onThemeFilterChange(e.target.value as Theme | "All")}
+          className="rounded-md border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink"
+        >
+          <option value="All">All themes</option>
+          {themes.map((t) => (
+            <option key={t} value={t}>
+              {t}
             </option>
           ))}
         </select>
@@ -140,6 +168,31 @@ export default function FeedbackExplorer({ items }: FeedbackExplorerProps) {
           ))}
         </select>
       </div>
+
+      {hasChartFilter && (
+        <div className="flex flex-wrap gap-2 border-b border-hairline px-4 py-2.5">
+          {categoryFilter !== "All" && (
+            <button
+              type="button"
+              onClick={() => onCategoryFilterChange("All")}
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink"
+            >
+              Category: {categoryFilter}
+              <span aria-hidden="true">×</span>
+            </button>
+          )}
+          {themeFilter !== "All" && (
+            <button
+              type="button"
+              onClick={() => onThemeFilterChange("All")}
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink"
+            >
+              Theme: {themeFilter}
+              <span aria-hidden="true">×</span>
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full text-xs">

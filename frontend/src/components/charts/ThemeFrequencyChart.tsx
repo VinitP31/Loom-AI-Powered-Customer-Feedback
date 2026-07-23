@@ -4,6 +4,8 @@ import DistributionBarChart from "./DistributionBarChart";
 
 interface ThemeFrequencyChartProps {
   analytics: Analytics;
+  activeTheme?: Theme | null;
+  onThemeClick?: (theme: Theme | null) => void;
 }
 
 // Themes aren't category-colored (a theme can appear under any category,
@@ -11,7 +13,7 @@ interface ThemeFrequencyChartProps {
 // this chart from implying a category-color relationship that isn't there.
 const THEME_BAR_COLOR = "#3b3fa0";
 
-export default function ThemeFrequencyChart({ analytics }: ThemeFrequencyChartProps) {
+export default function ThemeFrequencyChart({ analytics, activeTheme, onThemeClick }: ThemeFrequencyChartProps) {
   const rows = Object.entries(analytics.theme_frequency)
     .map(([name, value]) => ({
       name,
@@ -30,6 +32,8 @@ export default function ThemeFrequencyChart({ analytics }: ThemeFrequencyChartPr
       sub="Primary theme of processed tickets, top 8 by frequency"
       rows={rows}
       total={analytics.total_processed}
+      activeName={activeTheme}
+      onBarClick={onThemeClick ? (name) => onThemeClick(name as Theme | null) : undefined}
     />
   );
 }
