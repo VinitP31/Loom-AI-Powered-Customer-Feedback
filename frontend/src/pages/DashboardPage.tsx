@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAnalyze } from "../hooks/useAnalyze";
 import Nav from "../components/Nav";
 import AmbientStatus from "../components/AmbientStatus";
+import IdleLanding from "../components/IdleLanding";
 import ValidationBanner from "../components/ValidationBanner";
 import KpiCards from "../components/KpiCards";
 import CategoryDistributionChart from "../components/charts/CategoryDistributionChart";
@@ -11,13 +12,6 @@ import UrgencyBreakdownChart from "../components/charts/UrgencyBreakdownChart";
 import SummaryPanel from "../components/SummaryPanel";
 import FeedbackExplorer from "../components/FeedbackExplorer";
 import type { Category, Theme } from "../types/taxonomy";
-
-const FEATURE_HIGHLIGHTS = [
-  { title: "KPIs at a glance", detail: "Volume, sentiment split, top category/theme, urgency, success rate." },
-  { title: "Distribution charts", detail: "Category, theme, sentiment, and urgency — click a bar to filter tickets." },
-  { title: "Executive summary", detail: "A grounded narrative, generated once from the numbers already computed." },
-  { title: "Feedback explorer", detail: "Search, sort, and filter every processed ticket, with full detail on expand." },
-];
 
 export default function DashboardPage() {
   const { status, data, error, fileName, analyze } = useAnalyze();
@@ -63,16 +57,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {status === "idle" && (
-          <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {FEATURE_HIGHLIGHTS.map((f) => (
-              <div key={f.title} className="rounded-lg border border-hairline bg-surface p-4">
-                <p className="text-sm font-semibold text-ink">{f.title}</p>
-                <p className="mt-1.5 text-xs leading-relaxed text-ink-muted">{f.detail}</p>
-              </div>
-            ))}
-          </div>
-        )}
+        {status === "idle" && <IdleLanding onFile={handleFile} />}
 
         {status === "success" && data && (
           <div className="flex flex-col gap-3">
