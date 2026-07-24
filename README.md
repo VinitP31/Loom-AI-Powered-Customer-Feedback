@@ -234,8 +234,6 @@ Loom-AI-Powered-Customer-Feedback/
 ├── docs/
 │   ├── Loom_Source_of_Truth.md   Full design rationale — the document that wins
 │   │                             if anything else (including this README) disagrees
-│   ├── deviations.md              Log of any place implementation diverged from a
-│   │                             documented decision, and why (currently empty)
 │   └── screenshots/               The images embedded above
 └── LICENSE             MIT
 ```
@@ -275,7 +273,6 @@ Documented honestly rather than hidden — full detail in [`backend/README.md`](
 | [`backend/README.md`](backend/README.md) | Backend setup, running (CLI + API), full response shape, configuration, error codes, testing, troubleshooting |
 | [`frontend/README.md`](frontend/README.md) | Frontend setup, running, build/test/lint (including *why* the test suite stubs several browser APIs), full component structure, troubleshooting |
 | [`docs/Loom_Source_of_Truth.md`](docs/Loom_Source_of_Truth.md) | The authoritative design document — architecture, taxonomy, every pipeline stage, the validation/repair contract, in full detail |
-| [`docs/deviations.md`](docs/deviations.md) | Any place the implementation diverged from a documented decision, and why (empty as of this writing — nothing has needed to diverge) |
 
 ---
 
