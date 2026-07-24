@@ -1,6 +1,6 @@
 # Loom Frontend
 
-React + TypeScript dashboard for Loom. Uploads a CSV, calls the backend's single `POST /analyze` endpoint once, and renders the returned payload — KPIs, distribution charts, an executive summary, and a searchable/sortable feedback table. No AI runs in the frontend; every number on screen is a direct read of data the backend already computed.
+React + TypeScript dashboard for Loom. Uploads a CSV, calls the backend's single `POST /analyze` endpoint once, and renders the returned payload — KPIs, distribution charts, an executive summary, and a searchable/sortable feedback table, exportable as a PDF report. No AI runs in the frontend; every number on screen is a direct read of data the backend already computed.
 
 Full design rationale: [`docs/Loom_Source_of_Truth.md`](../docs/Loom_Source_of_Truth.md).
 
@@ -99,6 +99,8 @@ src/
 │   ├── SummaryPanel.tsx       # renders the backend's executive summary verbatim (clamped)
 │   ├── FeedbackExplorer.tsx   # ticket table: search, sort, category/theme/sentiment/
 │   │                          # urgency filters, expandable rows with additional_issues
+│   ├── ExportButton.tsx       # exports the current analysis as a PDF report
+│   │                          # (KPIs + distributions + summary — see utils/exportReport.ts)
 │   └── charts/
 │       ├── DistributionBarChart.tsx      # shared Recharts bar chart (labels, tooltip,
 │       │                                 # optional click-to-filter)
@@ -109,8 +111,10 @@ src/
 ├── pages/
 │   └── DashboardPage.tsx      # composes everything above into the single dashboard view
 ├── utils/
-│   └── colors.ts              # ONE category/sentiment/urgency color map — every chart
-│                              # and the table import from here, never a local hex value
+│   ├── colors.ts              # ONE category/sentiment/urgency color map — every chart
+│   │                          # and the table import from here, never a local hex value
+│   └── exportReport.ts        # builds the PDF report (jsPDF + jspdf-autotable)
+│                              # from the same AnalyzeResponse already in state
 ├── test/
 │   ├── setup.ts               # jsdom stubs (see above)
 │   └── fixtures/              # real /analyze responses captured from the live backend
@@ -132,6 +136,7 @@ Mirrors `backend/README.md`'s Response Shape exactly (the frontend's `types/anal
 - **Charts** (`components/charts/`): category distribution, top themes, sentiment split, urgency breakdown — each a horizontal bar chart, each fully labeled, each clickable (category/theme) to filter the ticket table below.
 - **Executive summary** (`SummaryPanel`): the backend's grounded narrative, rendered as-is.
 - **Ticket table** (`FeedbackExplorer`): every processed ticket, searchable over feedback text, sortable, filterable, expandable to show `additional_issues`.
+- **Export** (`ExportButton`): a one-click PDF report of the KPIs, the four distributions, and the executive summary — deliberately not a dump of every ticket (that's already in the table above), built client-side from the same payload, nothing recomputed.
 
 What it deliberately does **not** do (see `frontend/CLAUDE.md`'s "Do NOT" list for the full set):
 - Never calls an LLM or any AI service — it only renders what `/analyze` already returned.

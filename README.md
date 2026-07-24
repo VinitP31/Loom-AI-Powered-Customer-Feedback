@@ -40,6 +40,12 @@ I built this end to end — backend pipeline, prompt design, and the React front
 
 ![Expanded ticket row showing full feedback and additional issues](docs/screenshots/ticket-expanded.png)
 
+**Export a PDF report** — one click, built client-side from the same payload already on screen: KPIs, the four distributions, and the executive summary. Deliberately not a raw ticket dump — that's already searchable in the table above.
+
+![Export PDF button next to the validation banner](docs/screenshots/export-button.png)
+
+![The generated PDF report](docs/screenshots/export-pdf-report.png)
+
 ---
 
 ## Why it's built this way
@@ -112,6 +118,7 @@ The whole pipeline runs inside one stateless request. There's no database, no jo
 | Frontend | React 19 + TypeScript, Vite | Modular, type-safe UI, fast dev loop |
 | Styling | Tailwind CSS v4 | Design tokens as CSS custom properties → light/dark theming with no per-component variants |
 | Charts | Recharts | Declarative, accessible, labeled by default |
+| Export | jsPDF + jspdf-autotable | Client-side PDF report generation — no server round-trip |
 | Backend tests | pytest | 48 tests, no real LLM calls needed to run them |
 | Frontend tests | Vitest + Testing Library + jsdom | Real component interactions against payloads captured from the live backend |
 

@@ -11,6 +11,7 @@ import SentimentDistributionChart from "../components/charts/SentimentDistributi
 import UrgencyBreakdownChart from "../components/charts/UrgencyBreakdownChart";
 import SummaryPanel from "../components/SummaryPanel";
 import FeedbackExplorer from "../components/FeedbackExplorer";
+import ExportButton from "../components/ExportButton";
 import type { Category, Theme } from "../types/taxonomy";
 
 export default function DashboardPage() {
@@ -61,7 +62,12 @@ export default function DashboardPage() {
 
         {status === "success" && data && (
           <div className="flex flex-col gap-3">
-            <ValidationBanner report={data.validation_report} />
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex-1">
+                <ValidationBanner report={data.validation_report} />
+              </div>
+              <ExportButton data={data} fileName={fileName} />
+            </div>
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start">
               <div className="flex flex-col gap-3">
                 <KpiCards analytics={data.analytics} validationReport={data.validation_report} />

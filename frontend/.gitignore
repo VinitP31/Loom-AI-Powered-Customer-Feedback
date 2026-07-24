@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# jsPDF's doc.save() falls back to writing to cwd under jsdom (no real
+# browser download API in the test environment) — stray output from
+# exportReport.test.ts, not a real build artifact.
+loom-report.pdf
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
