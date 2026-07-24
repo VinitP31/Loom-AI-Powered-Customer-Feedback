@@ -1,7 +1,7 @@
 import type { Analytics } from "../../types/analyze";
 import type { Sentiment } from "../../types/taxonomy";
 import { SENTIMENT_COLOR } from "../../utils/colors";
-import DistributionBarChart from "./DistributionBarChart";
+import DonutChart from "./DonutChart";
 
 interface SentimentDistributionChartProps {
   analytics: Analytics;
@@ -17,11 +17,6 @@ export default function SentimentDistributionChart({ analytics }: SentimentDistr
   }));
 
   return (
-    <DistributionBarChart
-      title="Sentiment Split"
-      sub="Share of processed tickets"
-      rows={rows}
-      total={analytics.total_processed}
-    />
+    <DonutChart title="Sentiment Split" sub="Share of processed tickets" rows={rows} total={analytics.total_processed} />
   );
 }

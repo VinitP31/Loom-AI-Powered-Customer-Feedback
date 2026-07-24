@@ -10,7 +10,7 @@
  * surfaces). "Other" always gets the neutral gray, per convention.
  */
 
-import type { Category, Sentiment, Urgency } from "../types/taxonomy";
+import { CATEGORY_THEMES, type Category, type Sentiment, type Theme, type Urgency } from "../types/taxonomy";
 
 export const SENTIMENT_COLOR: Record<Sentiment, string> = {
   Positive: "#0ca30c",
@@ -35,6 +35,24 @@ export const CATEGORY_COLOR: Record<Category, string> = {
   Security: "#e34948",
   Other: "#a7adb8",
 };
+
+/** Theme -> owning category's color, so the Top Themes chart reads as an
+ * extension of the Category Distribution chart instead of a disconnected
+ * single-hue chart. `Positive Feedback` is the one theme owned by every
+ * category (see CATEGORY_THEMES) — it gets the sentiment-positive green
+ * instead of an arbitrary category color, since it's a sentiment signal by
+ * name, not a category-specific issue type. */
+const THEME_TO_CATEGORY: Partial<Record<Theme, Category>> = Object.fromEntries(
+  (Object.entries(CATEGORY_THEMES) as [Category, Theme[]][]).flatMap(([category, themes]) =>
+    themes.filter((t) => t !== "Positive Feedback").map((theme) => [theme, category]),
+  ),
+);
+
+export function themeColor(theme: Theme): string {
+  if (theme === "Positive Feedback") return SENTIMENT_COLOR.Positive;
+  const category = THEME_TO_CATEGORY[theme];
+  return category ? CATEGORY_COLOR[category] : CATEGORY_COLOR.Other;
+}
 
 /** Sort order used to rank urgency (High first) and sentiment (Negative
  * first) wherever a fixed severity ordering matters more than alphabetical

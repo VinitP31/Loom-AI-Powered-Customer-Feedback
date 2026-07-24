@@ -143,6 +143,114 @@ body {
   }
 }
 
+/* KpiCards: a soft accent glow tracks the cursor across the whole KPI
+   field (one shared light source, not one per card), and each card tilts
+   in 3D toward the cursor. --glow-x/--glow-y are set from JS on
+   mousemove; the glow only becomes visible on :hover so it doesn't sit
+   there as a static blob before the user engages. */
+.kpi-spotlight-field {
+  --glow-x: 50%;
+  --glow-y: 50%;
+}
+.kpi-spotlight-glow {
+  width: 420px;
+  height: 420px;
+  left: var(--glow-x);
+  top: var(--glow-y);
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, color-mix(in oklab, var(--color-accent) 20%, transparent), transparent 70%);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.kpi-spotlight-field:hover .kpi-spotlight-glow {
+  opacity: 1;
+}
+.kpi-card {
+  transform-style: preserve-3d;
+  transition:
+    transform 0.15s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.2s ease-out,
+    border-color 0.2s ease-out;
+  animation: kpi-card-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+@keyframes kpi-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Heartbeat border: two short dashed lines continuously travel the full
+   perimeter of every KPI card (not just on hover) — drawn as an actual SVG
+   rect stroke (pathLength="100" normalizes stroke-dasharray/offset to a
+   0-100 scale regardless of the card's real pixel perimeter), animated via
+   stroke-dashoffset. This traces the literal border path — the earlier
+   conic-gradient + CSS mask approach silently failed to clip in Chromium
+   and rendered as a wedge from the center instead of a border line. */
+.kpi-border-trace rect {
+  animation: kpi-border-travel 3.2s linear infinite;
+}
+@keyframes kpi-border-travel {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kpi-border-trace rect {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+.kpi-shine {
+  border-radius: inherit;
+  opacity: 0;
+  background: linear-gradient(115deg, transparent 20%, rgba(255, 255, 255, 0.4) 45%, transparent 65%);
+  background-size: 250% 250%;
+  background-position: 120% -20%;
+  transition: opacity 0.2s ease;
+}
+.kpi-card:hover .kpi-shine {
+  opacity: 1;
+  animation: kpi-shine-sweep 0.9s ease forwards;
+}
+@keyframes kpi-shine-sweep {
+  from {
+    background-position: 130% -30%;
+  }
+  to {
+    background-position: -30% 130%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kpi-spotlight-glow {
+    display: none;
+  }
+  .kpi-card {
+    transition: box-shadow 0.15s ease-out;
+    animation: none;
+  }
+  .kpi-shine {
+    display: none;
+  }
+}
+
+/* Distribution bar hover glow (CategoryDistributionChart,
+   ThemeFrequencyChart) — pure CSS :hover, deliberately NOT React state:
+   an onMouseEnter-driven re-render detaches the SVG node userEvent.click
+   is mid-click on, silently swallowing the click-to-filter interaction
+   (see DashboardPage.chartFilter.test.tsx). CSS has no such race. */
+.dist-bar-cell {
+  transition: filter 0.15s ease;
+}
+.dist-bar-cell:hover {
+  filter: brightness(1.12) saturate(1.15) drop-shadow(0 0 6px rgba(0, 0, 0, 0.25));
+}
+
 /* Clicking a chart bar to filter (CategoryDistributionChart,
    ThemeFrequencyChart) focuses the underlying SVG shape, and browsers
    draw their own default focus rectangle on top of it — a thick black

@@ -1,7 +1,7 @@
 import type { Analytics } from "../../types/analyze";
 import type { Urgency } from "../../types/taxonomy";
 import { URGENCY_COLOR } from "../../utils/colors";
-import DistributionBarChart from "./DistributionBarChart";
+import DonutChart from "./DonutChart";
 
 interface UrgencyBreakdownChartProps {
   analytics: Analytics;
@@ -17,7 +17,7 @@ export default function UrgencyBreakdownChart({ analytics }: UrgencyBreakdownCha
   }));
 
   return (
-    <DistributionBarChart
+    <DonutChart
       title="Urgency Breakdown"
       sub="By impact, independent of tone — primary issue only"
       rows={rows}
