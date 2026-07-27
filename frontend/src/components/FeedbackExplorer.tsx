@@ -6,7 +6,7 @@
  * additional_issues are primary-issue-exclusive in aggregates).
  */
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { TicketClassification } from "../types/analyze";
 import type { Category, Sentiment, Theme, Urgency } from "../types/taxonomy";
 import { CATEGORY_COLOR, SENTIMENT_COLOR, SENTIMENT_RANK, URGENCY_COLOR, URGENCY_RANK } from "../utils/colors";
@@ -43,6 +43,11 @@ const WARNING_LABEL: Record<string, string> = {
   duplicate_feedback: "duplicate",
 };
 
+// Fixed page size rather than "load more"/infinite scroll — a stable page
+// count makes "page 3 of 5" a meaningful, revisitable position, which an
+// ever-growing list doesn't give you.
+const PAGE_SIZE = 15;
+
 export default function FeedbackExplorer({
   items,
   categoryFilter,
@@ -60,6 +65,7 @@ export default function FeedbackExplorer({
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<1 | -1>(1);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
 
   const categories = useMemo(
     () => Array.from(new Set(items.map((i) => i.primary_category))).sort(),
@@ -103,6 +109,17 @@ export default function FeedbackExplorer({
     }
     return rows;
   }, [items, search, categoryFilter, themeFilter, sentimentFilter, urgencyFilter, actionableFilter, sortKey, sortDir]);
+
+  // Any change to what's included/how it's ordered invalidates the current
+  // page position — jump back to page 1 rather than stranding the user on
+  // a now-out-of-range or now-meaningless page.
+  useEffect(() => {
+    setPage(1);
+  }, [items, search, categoryFilter, themeFilter, sentimentFilter, urgencyFilter, actionableFilter, sortKey, sortDir]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const paginated = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -289,7 +306,7 @@ export default function FeedbackExplorer({
                 </td>
               </tr>
             )}
-            {filtered.map((t) => {
+            {paginated.map((t) => {
               const isExpanded = expanded.has(t.ticket_id);
               const isReview = t.primary_theme === "Requires Human Review";
               return (
@@ -388,6 +405,36 @@ export default function FeedbackExplorer({
           </tbody>
         </table>
       </div>
+
+      {filtered.length > 0 && (
+        <div className="flex items-center justify-between gap-2 border-t border-hairline px-4 py-2.5 text-xs text-ink-muted">
+          <span>
+            Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} of{" "}
+            {filtered.length}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={currentPage === 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="rounded-md border border-hairline bg-surface-2 px-2.5 py-1 font-medium text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Prev
+            </button>
+            <span>
+              Page {currentPage} of {pageCount}
+            </span>
+            <button
+              type="button"
+              disabled={currentPage === pageCount}
+              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              className="rounded-md border border-hairline bg-surface-2 px-2.5 py-1 font-medium text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
