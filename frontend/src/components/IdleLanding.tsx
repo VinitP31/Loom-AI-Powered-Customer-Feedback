@@ -4,8 +4,12 @@
  * processing pipeline shown as steps (doubling as a data-handling trust
  * signal), and a "what you can do" capability grid. Same theme/tokens as
  * the rest of the app — this only fills the idle state with real content
- * instead of leaving it mostly blank.
+ * instead of leaving it mostly blank. The hero itself is the drop target
+ * (not just the click-to-browse button) — a dashed highlight on dragover
+ * makes that obvious without a permanent boxed-dropzone look at rest.
  */
+
+import { useState } from "react";
 
 interface IdleLandingProps {
   onFile: (file: File) => void;
@@ -25,18 +29,44 @@ const CAPABILITIES = [
 ];
 
 export default function IdleLanding({ onFile }: IdleLandingProps) {
+  const [isDragging, setIsDragging] = useState(false);
+
   return (
     <div className="mt-2 flex flex-col gap-3">
-      {/* Hero — orientation and a real action, not just a headline */}
-      <div className="flex flex-col items-center rounded-lg border border-hairline bg-surface px-6 py-12 text-center">
+      {/* Hero — orientation and a real action, not just a headline. The
+          whole card is a drop target; dashed highlight only appears while
+          dragging so it doesn't read as a permanent boxed dropzone. */}
+      <div
+        className={`flex flex-col items-center rounded-lg border px-6 py-12 text-center transition-colors ${
+          isDragging ? "border-dashed border-accent bg-accent/5" : "border-hairline bg-surface"
+        }`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setIsDragging(true);
+        }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setIsDragging(false);
+          const file = e.dataTransfer.files?.[0];
+          if (file) onFile(file);
+        }}
+      >
         <p className="mb-2 text-[11.5px] font-bold uppercase tracking-wide text-accent">Get started</p>
         <h2 className="mb-3 max-w-xl text-2xl font-bold leading-tight text-ink">
           Turn a CSV of raw feedback into a stakeholder-ready dashboard.
         </h2>
         <p className="mb-6 max-w-lg text-sm leading-relaxed text-ink-2">
-          Drop a CSV with a <code className="rounded bg-surface-2 px-1 py-0.5">feedback</code> column. Loom
-          validates it, redacts anything personal, classifies every ticket, and hands back KPIs, charts, and a
-          written summary — all from one upload.
+          {isDragging ? (
+            "Drop to analyze."
+          ) : (
+            <>
+              Drag and drop a CSV, or browse for one, with a{" "}
+              <code className="rounded bg-surface-2 px-1 py-0.5">feedback</code> column. Loom validates it, redacts
+              anything personal, classifies every ticket, and hands back KPIs, charts, and a written summary — all
+              from one upload.
+            </>
+          )}
         </p>
         <label className="mb-5 flex cursor-pointer items-center gap-2 rounded-lg bg-accent px-5 py-3 text-sm font-semibold text-accent-ink hover:brightness-110">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

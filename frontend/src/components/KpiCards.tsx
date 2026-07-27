@@ -5,13 +5,25 @@
  * client-side recomputation of an analytic the backend already sends).
  */
 
-import { useRef, type CSSProperties, type MouseEvent } from "react";
+import { useRef, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import type { Analytics, ValidationReport } from "../types/analyze";
+import type { Category, Sentiment, Theme, Urgency } from "../types/taxonomy";
 import { prefersReducedMotion } from "../utils/motion";
 
 interface KpiCardsProps {
   analytics: Analytics;
   validationReport: ValidationReport;
+  activeSentiment: Sentiment | "All";
+  activeUrgency: Urgency | "All";
+  activeActionable: "All" | "Yes" | "No";
+  activeCategory: Category | "All";
+  activeTheme: Theme | "All";
+  onSentimentClick: (sentiment: Sentiment) => void;
+  onHighUrgencyClick: () => void;
+  onActionableClick: () => void;
+  onNeedsReviewClick: () => void;
+  onTopCategoryClick: (category: Category) => void;
+  onTopThemeClick: (theme: Theme) => void;
 }
 
 interface Kpi {
@@ -21,6 +33,8 @@ interface Kpi {
   tone?: "critical" | "warning" | "good";
   tieList?: string[];
   icon: string;
+  onClick?: () => void;
+  active?: boolean;
 }
 
 const TONE_CLASS: Record<NonNullable<Kpi["tone"]>, string> = {
@@ -50,7 +64,21 @@ const ICONS: Record<string, string> = {
   "Success Rate": "M3 12a9 9 0 1 0 9-9M3 3v6h6",
 };
 
-export default function KpiCards({ analytics: a, validationReport: v }: KpiCardsProps) {
+export default function KpiCards({
+  analytics: a,
+  validationReport: v,
+  activeSentiment,
+  activeUrgency,
+  activeActionable,
+  activeCategory,
+  activeTheme,
+  onSentimentClick,
+  onHighUrgencyClick,
+  onActionableClick,
+  onNeedsReviewClick,
+  onTopCategoryClick,
+  onTopThemeClick,
+}: KpiCardsProps) {
   const highUrgencyPct = v.processed ? ((a.high_urgency_count / v.processed) * 100).toFixed(1) : "0.0";
 
   const kpis: Kpi[] = [
@@ -62,6 +90,8 @@ export default function KpiCards({ analytics: a, validationReport: v }: KpiCards
       sub: `${a.sentiment_distribution.Positive ?? 0} tickets`,
       tone: "good",
       icon: ICONS.Positive,
+      onClick: () => onSentimentClick("Positive"),
+      active: activeSentiment === "Positive",
     },
     {
       label: "Negative",
@@ -69,20 +99,44 @@ export default function KpiCards({ analytics: a, validationReport: v }: KpiCards
       sub: `${a.sentiment_distribution.Negative ?? 0} tickets`,
       tone: "critical",
       icon: ICONS.Negative,
+      onClick: () => onSentimentClick("Negative"),
+      active: activeSentiment === "Negative",
     },
     a.top_category
-      ? { label: "Top Category", value: a.top_category, icon: ICONS["Top Category"] }
+      ? {
+          label: "Top Category",
+          value: a.top_category,
+          icon: ICONS["Top Category"],
+          onClick: () => onTopCategoryClick(a.top_category as Category),
+          active: activeCategory === a.top_category,
+        }
       : { label: "Top Category", value: "Tied", tieList: a.category_leaders, icon: ICONS["Top Category"] },
     a.top_theme
-      ? { label: "Top Theme", value: a.top_theme, icon: ICONS["Top Theme"] }
+      ? {
+          label: "Top Theme",
+          value: a.top_theme,
+          icon: ICONS["Top Theme"],
+          onClick: () => onTopThemeClick(a.top_theme as Theme),
+          active: activeTheme === a.top_theme,
+        }
       : { label: "Top Theme", value: "Tied", tieList: a.theme_leaders, icon: ICONS["Top Theme"] },
-    { label: "High Urgency", value: String(a.high_urgency_count), sub: `${highUrgencyPct}%`, tone: "critical", icon: ICONS["High Urgency"] },
+    {
+      label: "High Urgency",
+      value: String(a.high_urgency_count),
+      sub: `${highUrgencyPct}%`,
+      tone: "critical",
+      icon: ICONS["High Urgency"],
+      onClick: onHighUrgencyClick,
+      active: activeUrgency === "High",
+    },
     {
       label: "Actionable",
       value: `${a.actionable_pct.toFixed(1)}%`,
       sub: `${a.actionable_count} tickets`,
       tone: "good",
       icon: ICONS.Actionable,
+      onClick: onActionableClick,
+      active: activeActionable === "Yes",
     },
     {
       label: "Needs Review",
@@ -90,6 +144,8 @@ export default function KpiCards({ analytics: a, validationReport: v }: KpiCards
       sub: "fell back to review",
       tone: a.fell_back_count > 0 ? "warning" : undefined,
       icon: ICONS["Needs Review"],
+      onClick: a.fell_back_count > 0 ? onNeedsReviewClick : undefined,
+      active: activeTheme === "Requires Human Review",
     },
     {
       label: "Success Rate",
@@ -135,7 +191,23 @@ export default function KpiCards({ analytics: a, validationReport: v }: KpiCards
         {kpis.map((kpi, i) => (
           <div
             key={kpi.label}
-            className="kpi-card group relative overflow-hidden rounded-lg border border-hairline bg-surface px-3 py-2 will-change-transform hover:shadow-[0_16px_30px_-14px_rgba(0,0,0,0.32)] hover:border-[color-mix(in_oklab,var(--tone,var(--color-accent))_45%,var(--color-hairline))]"
+            role={kpi.onClick ? "button" : undefined}
+            tabIndex={kpi.onClick ? 0 : undefined}
+            onClick={kpi.onClick}
+            onKeyDown={
+              kpi.onClick
+                ? (e: KeyboardEvent<HTMLDivElement>) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      kpi.onClick?.();
+                    }
+                  }
+                : undefined
+            }
+            title={kpi.onClick ? "Click to filter the ticket table" : undefined}
+            className={`kpi-card group relative overflow-hidden rounded-lg border px-3 py-2 will-change-transform hover:shadow-[0_16px_30px_-14px_rgba(0,0,0,0.32)] hover:border-[color-mix(in_oklab,var(--tone,var(--color-accent))_45%,var(--color-hairline))] ${
+              kpi.onClick ? "cursor-pointer" : ""
+            } ${kpi.active ? "border-[var(--tone,var(--color-accent))] ring-2 ring-[color-mix(in_oklab,var(--tone,var(--color-accent))_35%,transparent)]" : "border-hairline"}`}
             style={{ "--tone": kpi.tone ? TONE_VAR[kpi.tone] : undefined, animationDelay: `${i * 40}ms` } as CSSProperties}
             onMouseMove={handleCardMouseMove}
             onMouseLeave={handleCardMouseLeave}

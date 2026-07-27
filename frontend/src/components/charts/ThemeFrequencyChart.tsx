@@ -9,8 +9,11 @@ interface ThemeFrequencyChartProps {
   onThemeClick?: (theme: Theme | null) => void;
 }
 
+const SHOWN = 8;
+
 export default function ThemeFrequencyChart({ analytics, activeTheme, onThemeClick }: ThemeFrequencyChartProps) {
-  const rows = Object.entries(analytics.theme_frequency)
+  const allThemes = Object.entries(analytics.theme_frequency);
+  const rows = allThemes
     .map(([name, value]) => ({
       name,
       value: value ?? 0,
@@ -19,13 +22,20 @@ export default function ThemeFrequencyChart({ analytics, activeTheme, onThemeCli
     }))
     // Top themes only — frontend/CLAUDE.md: "sort for readability"; a
     // long tail of 1-count themes crowds the chart without adding signal.
+    // The sub-label below states the true total instead of a bare "top 8"
+    // so a batch with more themes than fit isn't silently truncated.
     .sort((a, b) => b.value - a.value)
-    .slice(0, 8);
+    .slice(0, SHOWN);
+
+  const sub =
+    allThemes.length > SHOWN
+      ? `Primary theme of processed tickets — top ${SHOWN} of ${allThemes.length}`
+      : "Primary theme of processed tickets";
 
   return (
     <DistributionBarChart
       title="Top Themes"
-      sub="Primary theme of processed tickets, top 8 by frequency"
+      sub={sub}
       rows={rows}
       total={analytics.total_processed}
       activeName={activeTheme}

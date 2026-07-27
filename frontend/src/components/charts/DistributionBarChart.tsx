@@ -7,7 +7,8 @@
  * against `total` (the caller passes `processed`), never total_rows.
  */
 
-import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import type { KeyboardEvent } from "react";
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { tiltHandlers } from "../../utils/motion";
 
 export interface DistributionRow {
@@ -111,6 +112,9 @@ export default function DistributionBarChart({
       ) : (
         <ResponsiveContainer width="100%" height={height}>
           <BarChart data={sorted} layout="vertical" margin={{ left: 4, right: 28, top: 0, bottom: 0 }}>
+            {/* Vertical gridlines only — gives a scale reference for bar
+                length without axis labels/ticks cluttering the chart. */}
+            <CartesianGrid horizontal={false} strokeDasharray="2 4" stroke="var(--color-hairline)" />
             <XAxis type="number" hide />
             <YAxis
               type="category"
@@ -138,18 +142,37 @@ export default function DistributionBarChart({
             >
               {sorted.map((row) => {
                 const isLeader = leaderName === row.name;
+                const isActive = activeName === row.name;
+                const pct = total ? ((row.value / total) * 100).toFixed(1) : "0.0";
                 return (
                   <Cell
                     key={row.name}
                     className="dist-bar-cell"
                     fill={row.color}
-                    fillOpacity={activeName && activeName !== row.name ? 0.35 : 1}
-                    stroke={activeName === row.name ? "var(--color-accent)" : undefined}
-                    strokeWidth={activeName === row.name ? 2 : 0}
+                    fillOpacity={activeName && !isActive ? 0.35 : 1}
+                    stroke={isActive ? "var(--color-accent)" : undefined}
+                    strokeWidth={isActive ? 2 : 0}
                     style={{
                       filter: isLeader ? `drop-shadow(0 0 3px ${row.color})` : undefined,
                       cursor: clickable ? "pointer" : undefined,
                     }}
+                    // Keyboard parity with the KPI cards' click-to-filter —
+                    // a Recharts bar has no native focus/activation without this.
+                    tabIndex={clickable ? 0 : undefined}
+                    role={clickable ? "button" : undefined}
+                    aria-label={
+                      clickable ? `${row.name}: ${row.value} tickets, ${pct}%${isActive ? " (filter active)" : ""}` : undefined
+                    }
+                    onKeyDown={
+                      clickable
+                        ? (e: KeyboardEvent<SVGPathElement>) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              onBarClick?.(isActive ? null : row.name);
+                            }
+                          }
+                        : undefined
+                    }
                   />
                 );
               })}

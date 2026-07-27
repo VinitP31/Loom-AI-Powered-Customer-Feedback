@@ -13,13 +13,20 @@ import { CATEGORY_COLOR, SENTIMENT_COLOR, SENTIMENT_RANK, URGENCY_COLOR, URGENCY
 
 interface FeedbackExplorerProps {
   items: TicketClassification[];
-  /** Controlled by DashboardPage so a click on the category/theme charts
-   * filters this table directly — "if I click Billing on the chart, I
-   * want to see only Billing tickets here." */
+  /** All four filters are controlled by DashboardPage so a click on a
+   * chart bar OR a KPI card ("Positive", "High Urgency", "Actionable",
+   * "Needs Review", ...) filters this table directly — one filter model
+   * shared by every entry point, not two separate ones. */
   categoryFilter: Category | "All";
   onCategoryFilterChange: (category: Category | "All") => void;
   themeFilter: Theme | "All";
   onThemeFilterChange: (theme: Theme | "All") => void;
+  sentimentFilter: Sentiment | "All";
+  onSentimentFilterChange: (sentiment: Sentiment | "All") => void;
+  urgencyFilter: Urgency | "All";
+  onUrgencyFilterChange: (urgency: Urgency | "All") => void;
+  actionableFilter: "All" | "Yes" | "No";
+  onActionableFilterChange: (actionable: "All" | "Yes" | "No") => void;
 }
 
 type SortKey = "ticket_id" | "primary_category" | "primary_theme" | "sentiment" | "urgency" | "actionable";
@@ -27,16 +34,29 @@ type SortKey = "ticket_id" | "primary_category" | "primary_theme" | "sentiment" 
 const SENTIMENT_OPTIONS: Sentiment[] = ["Positive", "Neutral", "Negative"];
 const URGENCY_OPTIONS: Urgency[] = ["High", "Medium", "Low"];
 
+// "long_ticket" is dropped — it's redundant with the "summarized" badge
+// (a long ticket always gets summarized before classification), so
+// showing both would just say the same thing twice.
+const WARNING_LABEL: Record<string, string> = {
+  html_present: "html",
+  markdown_present: "markdown",
+  duplicate_feedback: "duplicate",
+};
+
 export default function FeedbackExplorer({
   items,
   categoryFilter,
   onCategoryFilterChange,
   themeFilter,
   onThemeFilterChange,
+  sentimentFilter,
+  onSentimentFilterChange,
+  urgencyFilter,
+  onUrgencyFilterChange,
+  actionableFilter,
+  onActionableFilterChange,
 }: FeedbackExplorerProps) {
   const [search, setSearch] = useState("");
-  const [sentimentFilter, setSentimentFilter] = useState<Sentiment | "All">("All");
-  const [urgencyFilter, setUrgencyFilter] = useState<Urgency | "All">("All");
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<1 | -1>(1);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -54,6 +74,7 @@ export default function FeedbackExplorer({
       if (themeFilter !== "All" && t.primary_theme !== themeFilter) return false;
       if (sentimentFilter !== "All" && t.sentiment !== sentimentFilter) return false;
       if (urgencyFilter !== "All" && t.urgency !== urgencyFilter) return false;
+      if (actionableFilter !== "All" && t.actionable !== (actionableFilter === "Yes")) return false;
       if (q && !t.feedback_text.toLowerCase().includes(q)) return false;
       return true;
     });
@@ -81,7 +102,7 @@ export default function FeedbackExplorer({
       });
     }
     return rows;
-  }, [items, search, categoryFilter, themeFilter, sentimentFilter, urgencyFilter, sortKey, sortDir]);
+  }, [items, search, categoryFilter, themeFilter, sentimentFilter, urgencyFilter, actionableFilter, sortKey, sortDir]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -106,7 +127,8 @@ export default function FeedbackExplorer({
     return <span className="ml-1 text-accent">{sortDir === 1 ? "↑" : "↓"}</span>;
   }
 
-  const hasChartFilter = categoryFilter !== "All" || themeFilter !== "All";
+  const hasChartFilter =
+    categoryFilter !== "All" || themeFilter !== "All" || sentimentFilter !== "All" || urgencyFilter !== "All" || actionableFilter !== "All";
 
   return (
     <div id="feedback-explorer" className="rounded-lg border border-hairline bg-surface">
@@ -145,7 +167,7 @@ export default function FeedbackExplorer({
         </select>
         <select
           value={sentimentFilter}
-          onChange={(e) => setSentimentFilter(e.target.value as Sentiment | "All")}
+          onChange={(e) => onSentimentFilterChange(e.target.value as Sentiment | "All")}
           className="rounded-md border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink"
         >
           <option value="All">All sentiment</option>
@@ -157,7 +179,7 @@ export default function FeedbackExplorer({
         </select>
         <select
           value={urgencyFilter}
-          onChange={(e) => setUrgencyFilter(e.target.value as Urgency | "All")}
+          onChange={(e) => onUrgencyFilterChange(e.target.value as Urgency | "All")}
           className="rounded-md border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink"
         >
           <option value="All">All urgency</option>
@@ -166,6 +188,15 @@ export default function FeedbackExplorer({
               {u}
             </option>
           ))}
+        </select>
+        <select
+          value={actionableFilter}
+          onChange={(e) => onActionableFilterChange(e.target.value as "All" | "Yes" | "No")}
+          className="rounded-md border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink"
+        >
+          <option value="All">Actionable: All</option>
+          <option value="Yes">Actionable: Yes</option>
+          <option value="No">Actionable: No</option>
         </select>
       </div>
 
@@ -188,6 +219,36 @@ export default function FeedbackExplorer({
               className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink"
             >
               Theme: {themeFilter}
+              <span aria-hidden="true">×</span>
+            </button>
+          )}
+          {sentimentFilter !== "All" && (
+            <button
+              type="button"
+              onClick={() => onSentimentFilterChange("All")}
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink"
+            >
+              Sentiment: {sentimentFilter}
+              <span aria-hidden="true">×</span>
+            </button>
+          )}
+          {urgencyFilter !== "All" && (
+            <button
+              type="button"
+              onClick={() => onUrgencyFilterChange("All")}
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink"
+            >
+              Urgency: {urgencyFilter}
+              <span aria-hidden="true">×</span>
+            </button>
+          )}
+          {actionableFilter !== "All" && (
+            <button
+              type="button"
+              onClick={() => onActionableFilterChange("All")}
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-ink"
+            >
+              Actionable: {actionableFilter}
               <span aria-hidden="true">×</span>
             </button>
           )}
@@ -245,6 +306,16 @@ export default function FeedbackExplorer({
                           summarized
                         </span>
                       )}
+                      {t.warnings
+                        .filter((w) => w in WARNING_LABEL)
+                        .map((w) => (
+                          <span
+                            key={w}
+                            className="ml-1.5 rounded border border-hairline px-1 py-0.5 text-[9px] text-ink-muted"
+                          >
+                            {WARNING_LABEL[w]}
+                          </span>
+                        ))}
                     </td>
                     <td className="max-w-xs truncate px-3 py-2 text-ink-2">{t.feedback_text}</td>
                     <td className="px-3 py-2">

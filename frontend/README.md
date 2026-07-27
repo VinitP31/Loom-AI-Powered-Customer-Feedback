@@ -92,27 +92,47 @@ src/
 │                              # TicketClassification, Analytics, AnalyzeResponse)
 ├── components/
 │   ├── Nav.tsx                # top bar: brand, dark-mode toggle, upload trigger
-│   ├── AmbientStatus.tsx      # borderless status line below Nav (batch name + stage word)
-│   ├── IdleLanding.tsx        # pre-upload screen: hero, pipeline steps, capability grid
-│   ├── ValidationBanner.tsx   # total/processed/skipped rows, fell_back_count
-│   ├── KpiCards.tsx           # the 10 headline KPIs
+│   ├── AmbientStatus.tsx      # borderless status line below Nav (batch name + stage word);
+│   │                          # also a drag-and-drop target with a dashed highlight on dragover
+│   ├── IdleLanding.tsx        # pre-upload screen: hero (itself a real drag-and-drop
+│   │                          # dropzone, not just click-to-browse), pipeline steps, capability grid
+│   ├── HeadlineSummary.tsx    # one-line lead-with-the-conclusion strip at the top of the
+│   │                          # dashboard — composes existing analytics numbers, never recomputes
+│   ├── ValidationBanner.tsx   # total/processed/skipped rows, fell_back_count — skipped and
+│   │                          # needs-review counts are toggle chips that expand the real row list
+│   ├── KpiCards.tsx           # the 10 headline KPIs; Positive/Negative/Top Category/Top Theme/
+│   │                          # High Urgency/Actionable/Needs Review are click-to-filter, same
+│   │                          # model as the chart bars, with a colored ring on the active card
 │   ├── SummaryPanel.tsx       # renders the backend's executive summary verbatim (clamped)
-│   ├── FeedbackExplorer.tsx   # ticket table: search, sort, category/theme/sentiment/
-│   │                          # urgency filters, expandable rows with additional_issues
-│   ├── ExportButton.tsx       # exports the current analysis as a PDF report
-│   │                          # (KPIs + distributions + summary — see utils/exportReport.ts)
+│   ├── FeedbackExplorer.tsx   # ticket table: search, sort, category/theme/sentiment/urgency/
+│   │                          # actionable filters (all controlled from DashboardPage so KPI
+│   │                          # cards and charts share one filter model), expandable rows with
+│   │                          # additional_issues, and small badges for row-level `warnings`
+│   ├── ExportButton.tsx       # exports the current analysis as a PDF report (KPIs +
+│   │                          # distributions + skipped/needs-review lists + summary —
+│   │                          # see utils/exportReport.ts)
 │   └── charts/
 │       ├── DistributionBarChart.tsx      # shared Recharts bar chart (labels, tooltip,
-│       │                                 # optional click-to-filter)
+│       │                                 # vertical gridlines, optional click-to-filter —
+│       │                                 # keyboard-accessible: Tab + Enter/Space per bar)
 │       ├── CategoryDistributionChart.tsx
-│       ├── ThemeFrequencyChart.tsx
+│       ├── ThemeFrequencyChart.tsx        # caps at top 8, labels the true total ("top 8 of N")
+│       │                                  # instead of silently truncating past 8 themes
 │       ├── SentimentDistributionChart.tsx
-│       └── UrgencyBreakdownChart.tsx
+│       ├── UrgencyBreakdownChart.tsx
+│       └── DonutChart.tsx                 # shared donut for Sentiment/Urgency (hover pops a
+│                                          # segment, swaps the center readout to its count/share)
 ├── pages/
 │   └── DashboardPage.tsx      # composes everything above into the single dashboard view
 ├── utils/
 │   ├── colors.ts              # ONE category/sentiment/urgency color map — every chart
-│   │                          # and the table import from here, never a local hex value
+│   │                          # and the table import from here, never a local hex value;
+│   │                          # also derives theme→category colors so the theme chart
+│   │                          # matches the category chart's palette
+│   ├── motion.ts              # prefersReducedMotion() + tiltHandlers() — imperative DOM
+│   │                          # style mutation (never setState) for hover tilt/glow on
+│   │                          # clickable cards/charts, so a hover never re-renders and
+│   │                          # detaches a mid-click SVG node
 │   └── exportReport.ts        # builds the PDF report (jsPDF + jspdf-autotable)
 │                              # from the same AnalyzeResponse already in state
 ├── test/
@@ -132,11 +152,13 @@ See `frontend/CLAUDE.md` (gitignored, internal) for the full operational spec th
 
 Mirrors `backend/README.md`'s Response Shape exactly (the frontend's `types/analyze.ts` is typed against it field-for-field):
 
-- **KPIs** (`KpiCards`): total feedback, skipped rows, positive/negative %, top category/theme (or the tied leaders, when there's no single winner), high-urgency count, actionable %, needs-review count, processing success rate.
-- **Charts** (`components/charts/`): category distribution, top themes, sentiment split, urgency breakdown — each a horizontal bar chart, each fully labeled, each clickable (category/theme) to filter the ticket table below.
+- **Headline summary** (`HeadlineSummary`): a one-line lead-with-the-conclusion strip at the very top of the dashboard — tickets analyzed, top issue, % negative, high-urgency count, % actionable — composed entirely from numbers `analytics`/`validation_report` already sent, never a new computation.
+- **KPIs** (`KpiCards`): total feedback, skipped rows, positive/negative %, top category/theme (or the tied leaders, when there's no single winner), high-urgency count, actionable %, needs-review count, processing success rate. Positive, Negative, Top Category, Top Theme, High Urgency, Actionable, and Needs Review are click-to-filter — same filter state the charts and table share, with a colored ring marking the active card.
+- **Charts** (`components/charts/`): category distribution, top themes, sentiment split (donut), urgency breakdown (donut) — each fully labeled, each clickable (category/theme bars) to filter the ticket table below, each bar keyboard-accessible (Tab focuses it, Enter/Space activates it, with a real `aria-label`). The theme chart labels its true total ("top 8 of 40") instead of silently truncating past 8.
+- **Validation status** (`ValidationBanner`): total/processed/skipped counts plus two toggle chips — "N skipped" and "N needs review" — that expand to the actual row list (ticket ID + reason, or ticket ID + feedback text), not just a number with no way to see which ticket it refers to.
 - **Executive summary** (`SummaryPanel`): the backend's grounded narrative, rendered as-is.
-- **Ticket table** (`FeedbackExplorer`): every processed ticket, searchable over feedback text, sortable, filterable, expandable to show `additional_issues`.
-- **Export** (`ExportButton`): a one-click PDF report of the KPIs, the four distributions, and the executive summary — deliberately not a dump of every ticket (that's already in the table above), built client-side from the same payload, nothing recomputed.
+- **Ticket table** (`FeedbackExplorer`): every processed ticket, searchable over feedback text, sortable, filterable by category/theme/sentiment/urgency/actionable, expandable to show `additional_issues`, with small badges for row-level `warnings` (`html`, `markdown`, `duplicate`) and a "summarized" badge for long tickets.
+- **Export** (`ExportButton`): a one-click PDF report of the KPIs, the four distributions, the skipped-rows and needs-review lists, and the executive summary — deliberately not a dump of every ticket (that's already in the table above), built client-side from the same payload, nothing recomputed.
 
 What it deliberately does **not** do (see `frontend/CLAUDE.md`'s "Do NOT" list for the full set):
 - Never calls an LLM or any AI service — it only renders what `/analyze` already returned.

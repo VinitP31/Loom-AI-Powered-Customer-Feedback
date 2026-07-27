@@ -53,7 +53,9 @@ export default function AmbientStatus({ status, fileName, onFile }: AmbientStatu
 
   return (
     <div
-      className={`flex items-center gap-3 px-6 py-4 text-xs transition-colors ${isDragging ? "text-accent" : "text-ink-muted"}`}
+      className={`flex items-center gap-3 rounded-lg border border-dashed px-6 py-4 text-xs transition-colors ${
+        isDragging ? "border-accent bg-accent/5 text-accent" : "border-transparent text-ink-muted"
+      }`}
       onDragOver={(e) => {
         e.preventDefault();
         setIsDragging(true);
@@ -73,7 +75,9 @@ export default function AmbientStatus({ status, fileName, onFile }: AmbientStatu
       </span>
       <span className="font-semibold text-ink-2">{label}</span>
       <span className="text-ink-muted/70">·</span>
-      <span className={isLoading ? "ambient-cycle-text" : undefined}>{stageText}</span>
+      <span className={isLoading ? "ambient-cycle-text" : undefined}>
+        {isDragging ? "Drop to analyze" : stageText}
+      </span>
     </div>
   );
 }

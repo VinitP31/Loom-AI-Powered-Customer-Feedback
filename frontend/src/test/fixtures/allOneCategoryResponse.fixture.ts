@@ -14,6 +14,7 @@ export const allOneCategoryResponseFixture: AnalyzeResponse = {
     processed: 5,
     skipped: 0,
     skip_reasons: {},
+    skipped_rows: [],
     fell_back_count: 0,
   },
   items: [
@@ -28,6 +29,7 @@ export const allOneCategoryResponseFixture: AnalyzeResponse = {
       ticket_id: "1",
       feedback_text: "I was charged twice for my subscription this month please refund.",
       was_summarized: false,
+      warnings: [],
     },
     {
       primary_category: "Billing & Payments",
@@ -40,6 +42,7 @@ export const allOneCategoryResponseFixture: AnalyzeResponse = {
       ticket_id: "2",
       feedback_text: "My credit card was billed the wrong amount for my subscription.",
       was_summarized: false,
+      warnings: [],
     },
     {
       primary_category: "Billing & Payments",
@@ -52,6 +55,7 @@ export const allOneCategoryResponseFixture: AnalyzeResponse = {
       ticket_id: "3",
       feedback_text: "I never got my refund for the cancelled subscription payment.",
       was_summarized: false,
+      warnings: [],
     },
     {
       primary_category: "Billing & Payments",
@@ -64,6 +68,7 @@ export const allOneCategoryResponseFixture: AnalyzeResponse = {
       ticket_id: "4",
       feedback_text: "There was an unexpected charge on my card for a service I did not order.",
       was_summarized: false,
+      warnings: [],
     },
     {
       primary_category: "Billing & Payments",
@@ -76,6 +81,7 @@ export const allOneCategoryResponseFixture: AnalyzeResponse = {
       ticket_id: "5",
       feedback_text: "My subscription renewal charged me at the old price by mistake, please fix billing.",
       was_summarized: false,
+      warnings: [],
     },
   ],
   analytics: {

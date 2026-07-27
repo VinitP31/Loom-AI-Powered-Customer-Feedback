@@ -13,6 +13,7 @@ export const analyzeResponseFixture: AnalyzeResponse = {
     processed: 3,
     skipped: 1,
     skip_reasons: { empty_or_null_feedback: 1 },
+    skipped_rows: [{ ticket_id: "row-3", reason: "empty_or_null_feedback" }],
     fell_back_count: 0,
   },
   items: [
@@ -27,6 +28,7 @@ export const analyzeResponseFixture: AnalyzeResponse = {
       ticket_id: "1",
       feedback_text: "App keeps crashing every time I open the camera screen.",
       was_summarized: false,
+      warnings: [],
     },
     {
       primary_category: "Usability & User Experience",
@@ -39,6 +41,7 @@ export const analyzeResponseFixture: AnalyzeResponse = {
       ticket_id: "2",
       feedback_text: "Great job on the new dashboard redesign, much easier to use now!",
       was_summarized: false,
+      warnings: [],
     },
     {
       primary_category: "Billing & Payments",
@@ -51,6 +54,7 @@ export const analyzeResponseFixture: AnalyzeResponse = {
       ticket_id: "4",
       feedback_text: "I was charged twice for my subscription this month please refund.",
       was_summarized: false,
+      warnings: [],
     },
   ],
   analytics: {

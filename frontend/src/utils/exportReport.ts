@@ -53,6 +53,12 @@ function buildReportSections(data: AnalyzeResponse, fileName: string | null) {
       .sort((x, y) => (y[1] ?? 0) - (x[1] ?? 0))
       .map(([name, count]) => [name, String(count ?? 0), pct(total ? ((count ?? 0) / total) * 100 : 0)]);
 
+  const skippedRows: [string, string][] = v.skipped_rows.map((row) => [row.ticket_id, row.reason.replace(/_/g, " ")]);
+
+  const needsReviewRows: [string, string][] = data.items
+    .filter((item) => item.primary_theme === "Requires Human Review")
+    .map((item) => [item.ticket_id, item.feedback_text]);
+
   return {
     batchLabel: fileName ? `Batch from "${fileName}"` : "Batch",
     summaryRows,
@@ -60,6 +66,8 @@ function buildReportSections(data: AnalyzeResponse, fileName: string | null) {
     themeRows: distributionTable(a.theme_frequency, a.total_processed),
     sentimentRows: distributionTable(a.sentiment_distribution, a.total_processed),
     urgencyRows: distributionTable(a.urgency_distribution, a.total_processed),
+    skippedRows,
+    needsReviewRows,
     summaryText: summary,
   };
 }
@@ -113,6 +121,33 @@ export function exportReportPdf(data: AnalyzeResponse, fileName: string | null) 
       theme: "grid",
       headStyles: { fillColor: [59, 63, 160] },
       styles: { fontSize: 9 },
+    });
+    y = (doc as WithAutoTable).lastAutoTable.finalY + 20;
+  }
+
+  const rowListTables: [string, string[], string[][]][] = [
+    ["Skipped Rows", ["Ticket", "Reason"], s.skippedRows],
+    ["Needs Review (fell back to human review)", ["Ticket", "Feedback"], s.needsReviewRows],
+  ];
+
+  for (const [title, head, rows] of rowListTables) {
+    if (rows.length === 0) continue;
+    if (y > 700) {
+      doc.addPage();
+      y = 50;
+    }
+    doc.setFontSize(12);
+    doc.text(title, marginX, y);
+    y += 10;
+    autoTable(doc, {
+      startY: y,
+      head: [head],
+      body: rows,
+      margin: { left: marginX, right: marginX },
+      theme: "grid",
+      headStyles: { fillColor: [59, 63, 160] },
+      styles: { fontSize: 9 },
+      columnStyles: head[1] === "Feedback" ? { 1: { cellWidth: 400 } } : undefined,
     });
     y = (doc as WithAutoTable).lastAutoTable.finalY + 20;
   }

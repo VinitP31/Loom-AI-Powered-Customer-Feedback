@@ -17,6 +17,10 @@ export interface TicketClassification {
   ticket_id: string;
   feedback_text: string;
   was_summarized: boolean;
+  /** Row-level quality flags from validate.py — e.g. "html_present",
+   * "markdown_present", "duplicate_feedback", "long_ticket". Never
+   * produced or seen by the model. */
+  warnings: string[];
   primary_category: Category;
   primary_theme: Theme;
   sentiment: Sentiment;
@@ -26,11 +30,17 @@ export interface TicketClassification {
   additional_issues: AdditionalIssue[];
 }
 
+export interface SkippedRow {
+  ticket_id: string;
+  reason: string;
+}
+
 export interface ValidationReport {
   total_rows: number;
   processed: number;
   skipped: number;
   skip_reasons: Record<string, number>;
+  skipped_rows: SkippedRow[];
   fell_back_count: number;
 }
 

@@ -255,9 +255,16 @@ body {
    ThemeFrequencyChart) focuses the underlying SVG shape, and browsers
    draw their own default focus rectangle on top of it — a thick black
    box that has nothing to do with our own active-bar indicator (the
-   accent-colored stroke/ring already applied via Cell). Suppress the
-   default outline; the click already has clear visual feedback. */
+   accent-colored stroke/ring already applied via Cell). Suppress that
+   default on a plain mouse-driven focus, but keep :focus-visible (a real
+   Tab-key focus) — bars are keyboard-activatable (Enter/Space, see
+   DistributionBarChart's Cell tabIndex), so a keyboard user still needs
+   a visible focus indicator; only the mouse-click box is noise. */
 .recharts-wrapper svg,
-.recharts-wrapper svg :focus {
+.recharts-wrapper svg :focus:not(:focus-visible) {
   outline: none;
+}
+.recharts-wrapper svg :focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
