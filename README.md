@@ -24,15 +24,17 @@ I built this end to end — backend pipeline, prompt design, and the React front
 
 ## What it looks like
 
-**Before any upload** — the app orients you instead of showing a blank page: a real CTA, the actual processing pipeline shown as steps, and what you'll be able to do once data's in.
+**Before any upload** — the app orients you instead of showing a blank page: a real CTA, the actual processing pipeline shown as steps, and what you'll be able to do once data's in. The whole hero card is a real drop target (not just the "Upload a CSV" button) — dragging a file over it shows a dashed highlight and "Drop to analyze."
 
 ![Idle landing screen](docs/screenshots/idle-screen.png)
 
-**After uploading a CSV** — KPIs, four labeled distribution charts, a grounded executive summary, and a searchable/sortable ticket table, all from one `/analyze` response. (This is a real run against the bundled 11-row dev sample — nothing here is mocked.)
+**After uploading a CSV** — a one-line headline strip leads with the conclusion (tickets analyzed, top issue, % negative, high-urgency count, % actionable), then KPIs, four labeled distribution charts, a grounded executive summary, and a searchable/sortable ticket table, all from one `/analyze` response. (This is a real run against the bundled 11-row dev sample — nothing here is mocked.)
 
 ![Full dashboard after analysis](docs/screenshots/dashboard-full.png)
 
-**Click a chart bar to filter the table** — category and theme charts are clickable; the ticket table narrows instantly, with a clearable pill showing the active filter.
+**Skipped rows and tickets that needed human review are never just a count.** Both are labeled, bordered toggle chips next to the validation summary — clicking one expands the real row list (ticket ID + reason for skipped rows, ticket ID + feedback text for fallback/review tickets), not just a number with no way to see which ticket it refers to.
+
+**Click a chart bar — or a KPI card — to filter the table.** Category/theme charts and the Positive, Negative, Top Category, Top Theme, High Urgency, Actionable, and Needs Review KPI cards are all click-to-filter; the ticket table narrows instantly, the active card gets a colored ring, and a clearable pill shows the active filter. Bars are also keyboard-accessible (Tab + Enter/Space), not mouse-only.
 
 ![Clicking a category bar filters the ticket table](docs/screenshots/click-to-filter.png)
 
@@ -40,7 +42,7 @@ I built this end to end — backend pipeline, prompt design, and the React front
 
 ![Expanded ticket row showing full feedback and additional issues](docs/screenshots/ticket-expanded.png)
 
-**Export a PDF report** — one click, built client-side from the same payload already on screen: KPIs, the four distributions, and the executive summary. Deliberately not a raw ticket dump — that's already searchable in the table above.
+**Export a PDF report** — one click, built client-side from the same payload already on screen: KPIs, the four distributions, the skipped-rows and needs-review lists, and the executive summary. Deliberately not a raw ticket dump — that's already searchable in the table above.
 
 ![Export PDF button next to the validation banner](docs/screenshots/export-button.png)
 
@@ -119,7 +121,7 @@ The whole pipeline runs inside one stateless request. There's no database, no jo
 | Styling | Tailwind CSS v4 | Design tokens as CSS custom properties → light/dark theming with no per-component variants |
 | Charts | Recharts | Declarative, accessible, labeled by default |
 | Export | jsPDF + jspdf-autotable | Client-side PDF report generation — no server round-trip |
-| Backend tests | pytest | 48 tests, no real LLM calls needed to run them |
+| Backend tests | pytest | 49 tests, no real LLM calls needed to run them |
 | Frontend tests | Vitest + Testing Library + jsdom | Real component interactions against payloads captured from the live backend |
 
 ---
@@ -191,6 +193,7 @@ Exactly one endpoint. Request: multipart CSV. Response:
     "processed": 10,
     "skipped": 1,
     "skip_reasons": { "empty_or_null_feedback": 1 },
+    "skipped_rows": [{ "ticket_id": "D11", "reason": "empty_or_null_feedback" }],
     "fell_back_count": 0
   },
   "items": [
@@ -204,7 +207,8 @@ Exactly one endpoint. Request: multipart CSV. Response:
       "sentiment_score": -0.7,
       "urgency": "Medium",
       "actionable": true,
-      "additional_issues": []
+      "additional_issues": [],
+      "warnings": []
     }
   ],
   "analytics": {
@@ -224,6 +228,7 @@ A few things worth knowing before you consume this response:
 - **`top_category`/`top_theme` are `null` on a tie.** Check `category_leaders`/`theme_leaders` instead of assuming a single winner — the frontend does exactly this (see the KPI cards in the dashboard screenshot above, where both are shown as "Tied").
 - **Skipped rows never enter any percentage or distribution.** They're reported once, in `validation_report`, and nowhere else.
 - **`additional_issues`** holds secondary issues on multi-issue tickets — never counted in headline distributions, only shown when you expand a ticket.
+- **`validation_report.skipped_rows`** and each item's **`warnings`** (`html_present`, `markdown_present`, `duplicate_feedback`, `long_ticket`) exist so the dashboard can show *which* row was dropped or flagged, not just an aggregate count — never derived by the model, attached from `pipeline/validate.py`'s row-level checks.
 - **File-level rejections are `4001`/`4002`/`4003`** (missing `feedback` column / empty file / no usable rows). Every other failure — a bad model response, a timeout — resolves internally to a fallback classification; the endpoint still returns `200`, with `fell_back_count` telling you how many tickets needed it.
 
 Full schema, every field, and the reasoning behind each rule: [`backend/README.md`](backend/README.md#response-shape).
@@ -253,7 +258,7 @@ Each service's own README is the maintained source of truth for its file-level s
 
 Both halves have a real, currently-passing test suite — not aspirational, not skipped, checked as part of building this.
 
-**Backend** — `cd backend && pytest` → 48 tests, zero real LLM calls (a duck-typed `FakeLLMClient` stands in wherever classification/summarization would otherwise fire). Covers file/row validation, PII redaction boundaries, the theme-category and sentiment-score schema validators, the analytics tie contract, the full validate → coerce → re-prompt → fallback repair sequence, and the `/analyze` endpoint end to end.
+**Backend** — `cd backend && pytest` → 49 tests, zero real LLM calls (a duck-typed `FakeLLMClient` stands in wherever classification/summarization would otherwise fire). Covers file/row validation, PII redaction boundaries, the theme-category and sentiment-score schema validators, the analytics tie contract, the full validate → coerce → re-prompt → fallback repair sequence, row-level `warnings` reaching the item, and the `/analyze` endpoint end to end.
 
 **Frontend** — `cd frontend && npm test` → Vitest + Testing Library, driving real interactions (upload, search, sort, filter, expand a row, **click an actual rendered chart bar and confirm the table narrows**) against `/analyze` payloads captured verbatim from the live backend, not hand-guessed mocks.
 

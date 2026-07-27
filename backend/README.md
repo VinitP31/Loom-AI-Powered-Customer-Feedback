@@ -85,7 +85,7 @@ There is exactly one endpoint: `POST /analyze`. The system is stateless — no d
 pytest
 ```
 
-48 tests, no real LLM calls, no API key needed to run them — every test that would otherwise touch the network gets a `FakeLLMClient` (`tests/conftest.py`) instead, a duck-typed stand-in exposing the same `structured_call`/`text_call` surface as the real `LLMClient`, configured per-test with canned responses. `LLM_MODEL`/`API_KEY` are still set to dummy values by an autouse fixture, since `utils/config.py` and `LLMClient.__init__` read them unconditionally — they're never actually sent anywhere in a test run.
+49 tests, no real LLM calls, no API key needed to run them — every test that would otherwise touch the network gets a `FakeLLMClient` (`tests/conftest.py`) instead, a duck-typed stand-in exposing the same `structured_call`/`text_call` surface as the real `LLMClient`, configured per-test with canned responses. `LLM_MODEL`/`API_KEY` are still set to dummy values by an autouse fixture, since `utils/config.py` and `LLMClient.__init__` read them unconditionally — they're never actually sent anywhere in a test run.
 
 | File | Covers |
 |---|---|
@@ -94,7 +94,7 @@ pytest
 | `test_schemas.py` | theme-belongs-to-category validation, the `Positive Feedback` cross-category exception, `sentiment_score` sign-agreement band, the fallback shape |
 | `test_analytics.py` | Denominator rule (percentages against `processed`, success rate against `total_uploaded`), the tie contract (`top_category`/`top_theme` null + leaders list), `fell_back_count`, `additional_issues` excluded from headline distributions |
 | `test_classify.py` | The validate → coerce → re-prompt(×1) → fallback sequence: first-try success, recovery via the one guaranteed re-prompt, exhaustion falling back cleanly, a malformed/no-tool-call response going through the same path as a validation failure, and batch ticket-independence |
-| `test_api.py` | `POST /analyze` end-to-end through FastAPI's `TestClient` — file-level error responses and a full success-path response shape, with `LLMClient` monkeypatched |
+| `test_api.py` | `POST /analyze` end-to-end through FastAPI's `TestClient` — file-level error responses, a full success-path response shape, per-row `skipped_rows` detail, and row-level `warnings` (e.g. `duplicate_feedback`) reaching the item, not just the model, with `LLMClient` monkeypatched |
 
 This deliberately isn't exhaustive coverage — it's a handful of tests per pipeline stage covering the scenarios `CLAUDE.md` calls out as load-bearing (the repair sequence, the tie contract, the denominator rule), not every possible input. Add to it as new edge cases turn up.
 
@@ -122,6 +122,7 @@ Empty file / zero rows → rejected (`4002`). A file with a valid `feedback` col
     "processed": 10,
     "skipped": 0,
     "skip_reasons": {},
+    "skipped_rows": [],
     "fell_back_count": 0
   },
   "items": [
@@ -135,7 +136,8 @@ Empty file / zero rows → rejected (`4002`). A file with a valid `feedback` col
       "sentiment_score": -0.7,
       "urgency": "High",
       "actionable": true,
-      "additional_issues": []
+      "additional_issues": [],
+      "warnings": []
     }
   ],
   "analytics": {
@@ -158,6 +160,8 @@ Notes:
 - `top_category` / `top_theme` are `null` when there's a tie — check `category_leaders` / `theme_leaders` instead of assuming a single winner always exists.
 - `additional_issues` holds secondary issues on multi-issue tickets (category, theme, urgency only — no sentiment, since sentiment is a whole-ticket property).
 - All PII (`[EMAIL]`, `[PHONE]`, `[CARD]`, `[ID]`) is redacted before the LLM ever sees the text; `feedback_text` in the response is the redacted version.
+- `validation_report.skipped_rows` lists every skipped row as `{ "ticket_id": "...", "reason": "empty_or_null_feedback" }` — not just the aggregate count/reasons breakdown, so a consumer can show exactly *which* row was dropped, not only how many.
+- Each item's `warnings` (e.g. `html_present`, `markdown_present`, `duplicate_feedback`, `long_ticket`) come from row-level validation in `pipeline/validate.py`, never from the model — attached to the classified item after classification via `TicketClassification.model_copy(update={"warnings": ...})` in `api/routes.py`.
 
 ---
 

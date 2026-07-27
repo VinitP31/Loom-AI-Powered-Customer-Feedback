@@ -347,11 +347,12 @@ Prompt templates are implementation artifacts. This document defines their **req
       "theme": "App Crash",
       "urgency": "Medium"
     }
-  ]
+  ],
+  "warnings": []
 }
 ```
 
-`ticket_id`, `feedback_text`, and `was_summarized` are backend-attached, not model output — `feedback_text` is the already-cleaned, PII-redacted input text (not the raw upload), attached so the Feedback Explorer has real text to search/sort/filter on; `was_summarized` records whether this ticket was long enough to be routed through Stage 4 summarization before classification.
+`ticket_id`, `feedback_text`, `was_summarized`, and `warnings` are backend-attached, not model output — `feedback_text` is the already-cleaned, PII-redacted input text (not the raw upload), attached so the Feedback Explorer has real text to search/sort/filter on; `was_summarized` records whether this ticket was long enough to be routed through Stage 4 summarization before classification; `warnings` carries the row's Stage 1 validation flags (`html_present`/`markdown_present`/`duplicate_feedback`/`long_ticket`), attached after classification so a row-level quality signal reaches the dashboard without the model ever reasoning about it.
 
 **The model's own output is a pure enumeration block, plus one bounded numeric field (`sentiment_score`).** No free-text/reasoning field is included. A prose rationale drives nothing in the first release (it does not condition classification and is not aggregated), costs output tokens on every call, and is the one field a model can waffle in — occasionally destabilizing the structured fields around it. Keeping the model's own output pure-enum-plus-bounded-numeric maximizes consistency, which is the primary correctness goal. `sentiment_score` doesn't reintroduce that risk — it's a single bounded float validated against the discrete label, not open prose. If evaluation later shows accuracy is weak specifically on ambiguous multi-issue tickets, the targeted fix is a reasoning-first field (rationale produced *before* the labels so it conditions them) — added only if the confusion data justifies it, and constrained to a short quoted trigger phrase rather than open prose.
 
@@ -443,15 +444,17 @@ Computed in Python over validated results:
 
 | Widget | Source |
 |--------|--------|
-| KPI Cards | Analytics engine |
+| Headline Summary (one-line strip) | Composed client-side from `analytics`/`validation_report` fields already in the response (tickets analyzed, top issue, % negative, high-urgency count, % actionable) — no new computation, just leads with the conclusion instead of burying it in a sidebar |
+| KPI Cards | Analytics engine. Positive/Negative/Top Category/Top Theme/High Urgency/Actionable/Needs Review are click-to-filter, feeding the same filter state as the charts and Feedback Explorer |
 | Category Distribution (chart) | Category counts |
-| Sentiment Distribution (chart) | Sentiment aggregation |
-| Theme Frequency (chart) | Theme aggregation |
-| Urgency Breakdown (chart) | Urgency aggregation |
+| Sentiment Distribution (chart, donut) | Sentiment aggregation |
+| Theme Frequency (chart) | Theme aggregation — capped to the top 8 by count; the sub-label states the true total ("top 8 of N") rather than silently truncating |
+| Urgency Breakdown (chart, donut) | Urgency aggregation |
 | Executive Summary (text) | Summary generator |
-| Feedback Explorer (table) | Structured feedback objects with search, sorting, and filtering — search/filter operates on the `feedback_text` field now returned per item; `was_summarized` can be shown as a badge |
+| Validation status (skipped / needs-review toggles) | `validation_report.skipped_rows` and items whose `primary_theme` is `Requires Human Review` — each rendered as a toggle chip that expands the real row list, not just an aggregate count |
+| Feedback Explorer (table) | Structured feedback objects with search, sorting, and filtering (category/theme/sentiment/urgency/actionable) — search/filter operates on the `feedback_text` field now returned per item; `was_summarized` and row-level `warnings` are shown as badges |
 
-Every chart must be self-explanatory: titled, axis-labeled, and interpretable by a stakeholder without a walkthrough. The dashboard consumes processed API data only and issues no LLM calls.
+Every chart must be self-explanatory: titled, axis-labeled, and interpretable by a stakeholder without a walkthrough. Bar charts additionally carry vertical gridlines for a scale reference and are keyboard-accessible (Tab + Enter/Space per bar), not mouse-only. The dashboard consumes processed API data only and issues no LLM calls.
 
 ---
 
@@ -470,8 +473,17 @@ The system is **stateless** with no database, so the entire pipeline runs in a *
 **Response:**
 ```json
 {
-  "validation_report": { "total_rows": 100, "processed": 97, "skipped": 3, "skip_reasons": {}, "fell_back_count": 2 },
-  "items": [ /* structured feedback objects, one per processed ticket */ ],
+  "validation_report": {
+    "total_rows": 100,
+    "processed": 97,
+    "skipped": 3,
+    "skip_reasons": {},
+    "skipped_rows": [ /* {"ticket_id": "...", "reason": "empty_or_null_feedback"}, one per skipped row */ ],
+    "fell_back_count": 2
+  },
+  "items": [ /* structured feedback objects, one per processed ticket — each carries a
+                `warnings` list (html_present/markdown_present/duplicate_feedback/long_ticket)
+                from row-level validation, attached after classification, never model output */ ],
   "analytics": { /* category, sentiment, theme, urgency distributions and KPIs */ },
   "summary": "Executive summary narrative..."
 }
@@ -511,7 +523,10 @@ Feedback
 ├── sentiment_score                (float, [-1.0, +1.0], sign-agrees with sentiment)
 ├── urgency
 ├── actionable
-└── additional_issues[]           (category, theme, urgency)
+├── additional_issues[]           (category, theme, urgency)
+└── warnings[]                     (row-level flags from Stage 1 validation — html_present,
+                                    markdown_present, duplicate_feedback, long_ticket; backend-
+                                    attached post-classification, never model output)
 ```
 
 ---
@@ -637,10 +652,15 @@ frontend/
 │   ├── api/             analyzeClient.ts — the one POST /analyze call
 │   ├── hooks/           useAnalyze() — request status + payload state
 │   ├── types/           taxonomy.ts + analyze.ts, mirroring the backend contract
-│   ├── components/      Nav, AmbientStatus, IdleLanding, KpiCards, ValidationBanner,
-│   │                    SummaryPanel, FeedbackExplorer, charts/
+│   ├── components/      Nav, AmbientStatus, IdleLanding, HeadlineSummary, KpiCards,
+│   │                    ValidationBanner, SummaryPanel, FeedbackExplorer, ExportButton, charts/
+│   │                    (DistributionBarChart, DonutChart, CategoryDistributionChart,
+│   │                    ThemeFrequencyChart, SentimentDistributionChart, UrgencyBreakdownChart)
 │   ├── pages/           DashboardPage — the single dashboard view
-│   ├── utils/           colors.ts — the one category/sentiment/urgency color map
+│   ├── utils/           colors.ts (the one category/sentiment/urgency color map, also
+│   │                    theme→category derivation), motion.ts (imperative tilt/glow —
+│   │                    never setState, so hover never detaches a mid-click SVG node),
+│   │                    exportReport.ts
 │   └── test/            vitest setup + fixtures captured from the live backend
 ```
 
@@ -653,7 +673,7 @@ frontend/
 | schemas | Pydantic models and validation |
 | services | External integrations (LLM, files) |
 | utils | Shared helpers |
-| tests | Backend pytest suite (48 tests) — validation, preprocessing, schema validators, analytics, the classification repair sequence, and the API endpoint, all without a real LLM call |
+| tests | Backend pytest suite (49 tests) — validation, preprocessing, schema validators, analytics, the classification repair sequence, row-level `warnings` reaching the item, and the API endpoint, all without a real LLM call |
 
 For the exact, currently-accurate directory listing and what each file does, see `backend/README.md` and `frontend/README.md` — this section is the high-level shape; the two READMEs are the maintained source of truth for file-level detail.
 
