@@ -177,6 +177,8 @@ Tickets are classified with **one LLM call per ticket** at **temperature 0**, ea
 
 **Ticket independence:** the failure, timeout, or malformed response of one ticket must not prevent classification of any other ticket. Each ticket succeeds or falls back on its own; there is no shared failure path.
 
+**Real progress, off the same loop.** `classify_batch_streaming` is a generator form of this exact worker pool — it yields a progress event each time a ticket actually finishes (the same `as_completed` completion signal, not a separate timer or estimate), which `api/routes.py` forwards as an NDJSON line on `/analyze`'s response (see API Endpoints). `classify_batch` (non-streaming — used by the CLI and tests) just drains this generator and returns the final ordered list, so there is one core loop, not two.
+
 ### Stage 6 — Analytics
 
 Pure Python. No LLM. Computes counts, distributions, theme frequency, urgency distribution, actionable counts, and KPIs.
@@ -452,7 +454,7 @@ Computed in Python over validated results:
 | Urgency Breakdown (chart, donut) | Urgency aggregation |
 | Executive Summary (text) | Summary generator |
 | Validation status (skipped / needs-review toggles) | `validation_report.skipped_rows` and items whose `primary_theme` is `Requires Human Review` — each rendered as a toggle chip that expands the real row list, not just an aggregate count |
-| Feedback Explorer (table) | Structured feedback objects with search, sorting, and filtering (category/theme/sentiment/urgency/actionable) — search/filter operates on the `feedback_text` field now returned per item; `was_summarized` and row-level `warnings` are shown as badges |
+| Feedback Explorer (table) | Structured feedback objects with search, sorting, filtering (category/theme/sentiment/urgency/actionable), and pagination (15 rows/page, resets to page 1 on any filter/search/sort change or a new upload — so a 100+ ticket batch never dumps one unbroken list) — search/filter operates on the `feedback_text` field now returned per item; `was_summarized` and row-level `warnings` are shown as badges |
 
 Every chart must be self-explanatory: titled, axis-labeled, and interpretable by a stakeholder without a walkthrough. Bar charts additionally carry vertical gridlines for a scale reference and are keyboard-accessible (Tab + Enter/Space per bar), not mouse-only. The dashboard consumes processed API data only and issues no LLM calls.
 
@@ -470,9 +472,12 @@ The system is **stateless** with no database, so the entire pipeline runs in a *
 
 **Request:** multipart CSV file.
 
-**Response:**
+**Response:** streamed as newline-delimited JSON (NDJSON) — still one request, one response, no `upload_id`, no polling, no second endpoint; it just isn't sent as a single blob. A progress line each time a ticket finishes classification (off the real worker-pool `as_completed` loop in `pipeline/classify.py`, not a fake timer), one "summarizing" line, then a final line with the complete payload:
+
 ```json
-{
+{"type": "progress", "stage": "classifying", "done": 42, "total": 97}
+{"type": "progress", "stage": "summarizing", "done": 97, "total": 97}
+{"type": "result", "data": {
   "validation_report": {
     "total_rows": 100,
     "processed": 97,
@@ -486,8 +491,10 @@ The system is **stateless** with no database, so the entire pipeline runs in a *
                 from row-level validation, attached after classification, never model output */ ],
   "analytics": { /* category, sentiment, theme, urgency distributions and KPIs */ },
   "summary": "Executive summary narrative..."
-}
+}}
 ```
+
+A consumer that doesn't care about progress can read the whole body and parse only the last line's `data` — identical shape to what this endpoint returned in one shot before streaming existed.
 
 **CORS** is currently permissive (`*`) for local/demo use; lock down to specific origin(s) before production deployment.
 
@@ -673,7 +680,7 @@ frontend/
 | schemas | Pydantic models and validation |
 | services | External integrations (LLM, files) |
 | utils | Shared helpers |
-| tests | Backend pytest suite (49 tests) — validation, preprocessing, schema validators, analytics, the classification repair sequence, row-level `warnings` reaching the item, and the API endpoint, all without a real LLM call |
+| tests | Backend pytest suite (50 tests) — validation, preprocessing, schema validators, analytics, the classification repair sequence, row-level `warnings` reaching the item, real per-ticket progress events streaming before the result, and the API endpoint, all without a real LLM call |
 
 For the exact, currently-accurate directory listing and what each file does, see `backend/README.md` and `frontend/README.md` — this section is the high-level shape; the two READMEs are the maintained source of truth for file-level detail.
 

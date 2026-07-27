@@ -28,7 +28,9 @@ I built this end to end — backend pipeline, prompt design, and the React front
 
 ![Idle landing screen](docs/screenshots/idle-screen.png)
 
-**After uploading a CSV** — a one-line headline strip leads with the conclusion (tickets analyzed, top issue, % negative, high-urgency count, % actionable), then KPIs, four labeled distribution charts, a grounded executive summary, and a searchable/sortable ticket table, all from one `/analyze` response. (This is a real run against the bundled 11-row dev sample — nothing here is mocked.)
+**While it's processing, the progress bar is real** — `/analyze` streams NDJSON, a line each time a ticket actually finishes classification, so "Classifying tickets… 6/10" and the fill percentage reflect genuine backend progress, not a timer guessing how long this usually takes.
+
+**After uploading a CSV** — a one-line headline strip leads with the conclusion (tickets analyzed, top issue, % negative, high-urgency count, % actionable), then KPIs, four labeled distribution charts, a grounded executive summary, and a searchable/sortable, paginated (15/page) ticket table, all from one `/analyze` response. (This is a real run against the bundled 11-row dev sample — nothing here is mocked.)
 
 ![Full dashboard after analysis](docs/screenshots/dashboard-full.png)
 
@@ -95,7 +97,7 @@ If you want the full reasoning behind any of this — including the tradeoffs I 
                                                  Dashboard Response
 ```
 
-The whole pipeline runs inside one stateless request. There's no database, no job queue, no `upload_id` — you send a CSV, you get back a complete JSON payload, and the frontend renders it.
+The whole pipeline runs inside one stateless request. There's no database, no job queue, no `upload_id` — you send a CSV, the response streams real per-ticket progress as classification runs, and the final line carries the complete payload the frontend renders from.
 
 ### The pipeline, stage by stage
 
@@ -121,7 +123,7 @@ The whole pipeline runs inside one stateless request. There's no database, no jo
 | Styling | Tailwind CSS v4 | Design tokens as CSS custom properties → light/dark theming with no per-component variants |
 | Charts | Recharts | Declarative, accessible, labeled by default |
 | Export | jsPDF + jspdf-autotable | Client-side PDF report generation — no server round-trip |
-| Backend tests | pytest | 49 tests, no real LLM calls needed to run them |
+| Backend tests | pytest | 50 tests, no real LLM calls needed to run them |
 | Frontend tests | Vitest + Testing Library + jsdom | Real component interactions against payloads captured from the live backend |
 
 ---
@@ -184,7 +186,15 @@ If both are running and you can upload `backend/data/loom_dev_10.csv` and see a 
 
 ## The API contract
 
-Exactly one endpoint. Request: multipart CSV. Response:
+Exactly one endpoint. Request: multipart CSV. Response: streamed as newline-delimited JSON (NDJSON) — a progress line each time a ticket finishes classification, one "summarizing" line, then a final line carrying the payload below. Still one request, one response, no polling, no second endpoint:
+
+```json
+{"type": "progress", "stage": "classifying", "done": 3, "total": 10}
+{"type": "progress", "stage": "summarizing", "done": 10, "total": 10}
+{"type": "result", "data": { /* payload below */ }}
+```
+
+`data`:
 
 ```json
 {
@@ -258,7 +268,7 @@ Each service's own README is the maintained source of truth for its file-level s
 
 Both halves have a real, currently-passing test suite — not aspirational, not skipped, checked as part of building this.
 
-**Backend** — `cd backend && pytest` → 49 tests, zero real LLM calls (a duck-typed `FakeLLMClient` stands in wherever classification/summarization would otherwise fire). Covers file/row validation, PII redaction boundaries, the theme-category and sentiment-score schema validators, the analytics tie contract, the full validate → coerce → re-prompt → fallback repair sequence, row-level `warnings` reaching the item, and the `/analyze` endpoint end to end.
+**Backend** — `cd backend && pytest` → 50 tests, zero real LLM calls (a duck-typed `FakeLLMClient` stands in wherever classification/summarization would otherwise fire). Covers file/row validation, PII redaction boundaries, the theme-category and sentiment-score schema validators, the analytics tie contract, the full validate → coerce → re-prompt → fallback repair sequence, row-level `warnings` reaching the item, that real per-ticket progress events stream before the result, and the `/analyze` endpoint end to end.
 
 **Frontend** — `cd frontend && npm test` → Vitest + Testing Library, driving real interactions (upload, search, sort, filter, expand a row, **click an actual rendered chart bar and confirm the table narrows**) against `/analyze` payloads captured verbatim from the live backend, not hand-guessed mocks.
 

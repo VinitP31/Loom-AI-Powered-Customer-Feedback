@@ -80,10 +80,13 @@ The test suite itself drives real interactions through the real component tree �
 ```
 src/
 ├── api/
-│   └── analyzeClient.ts       # the one POST /analyze call; throws AnalyzeApiError with
-│                              # the backend's error_code/message on a 4xx
+│   └── analyzeClient.ts       # the one POST /analyze call; reads the streamed NDJSON body
+│                              # line-by-line (progress callback + final result), falls back
+│                              # to a plain res.json() if there's no body reader; throws
+│                              # AnalyzeApiError with the backend's error_code/message on a 4xx
 ├── hooks/
-│   └── useAnalyze.ts          # owns request status (idle/loading/success/error) + the
+│   └── useAnalyze.ts          # owns request status (idle/loading/success/error), real
+│                              # progress ({stage, done, total} off the stream), and the
 │                              # response payload — no polling, no persistence
 ├── types/
 │   ├── taxonomy.ts            # Category/Theme/Sentiment/Urgency string unions, mirrored
@@ -92,8 +95,10 @@ src/
 │                              # TicketClassification, Analytics, AnalyzeResponse)
 ├── components/
 │   ├── Nav.tsx                # top bar: brand, dark-mode toggle, upload trigger
-│   ├── AmbientStatus.tsx      # borderless status line below Nav (batch name + stage word);
-│   │                          # also a drag-and-drop target with a dashed highlight on dragover
+│   ├── AmbientStatus.tsx      # borderless status line below Nav (batch name + stage text —
+│   │                          # real progress, e.g. "Classifying tickets… 6/10", off the
+│   │                          # streamed response, not a fake cycling animation); also a
+│   │                          # drag-and-drop target with a dashed highlight on dragover
 │   ├── IdleLanding.tsx        # pre-upload screen: hero (itself a real drag-and-drop
 │   │                          # dropzone, not just click-to-browse), pipeline steps, capability grid
 │   ├── HeadlineSummary.tsx    # one-line lead-with-the-conclusion strip at the top of the
@@ -107,7 +112,9 @@ src/
 │   ├── FeedbackExplorer.tsx   # ticket table: search, sort, category/theme/sentiment/urgency/
 │   │                          # actionable filters (all controlled from DashboardPage so KPI
 │   │                          # cards and charts share one filter model), expandable rows with
-│   │                          # additional_issues, and small badges for row-level `warnings`
+│   │                          # additional_issues, small badges for row-level `warnings`, and
+│   │                          # pagination (15 rows/page — resets to page 1 on any filter/
+│   │                          # search/sort change or a new upload)
 │   ├── ExportButton.tsx       # exports the current analysis as a PDF report (KPIs +
 │   │                          # distributions + skipped/needs-review lists + summary —
 │   │                          # see utils/exportReport.ts)
@@ -157,7 +164,7 @@ Mirrors `backend/README.md`'s Response Shape exactly (the frontend's `types/anal
 - **Charts** (`components/charts/`): category distribution, top themes, sentiment split (donut), urgency breakdown (donut) — each fully labeled, each clickable (category/theme bars) to filter the ticket table below, each bar keyboard-accessible (Tab focuses it, Enter/Space activates it, with a real `aria-label`). The theme chart labels its true total ("top 8 of 40") instead of silently truncating past 8.
 - **Validation status** (`ValidationBanner`): total/processed/skipped counts plus two toggle chips — "N skipped" and "N needs review" — that expand to the actual row list (ticket ID + reason, or ticket ID + feedback text), not just a number with no way to see which ticket it refers to.
 - **Executive summary** (`SummaryPanel`): the backend's grounded narrative, rendered as-is.
-- **Ticket table** (`FeedbackExplorer`): every processed ticket, searchable over feedback text, sortable, filterable by category/theme/sentiment/urgency/actionable, expandable to show `additional_issues`, with small badges for row-level `warnings` (`html`, `markdown`, `duplicate`) and a "summarized" badge for long tickets.
+- **Ticket table** (`FeedbackExplorer`): every processed ticket, searchable over feedback text, sortable, filterable by category/theme/sentiment/urgency/actionable, paginated (15/page, so a 100+ ticket batch doesn't dump one giant unbroken list), expandable to show `additional_issues`, with small badges for row-level `warnings` (`html`, `markdown`, `duplicate`) and a "summarized" badge for long tickets.
 - **Export** (`ExportButton`): a one-click PDF report of the KPIs, the four distributions, the skipped-rows and needs-review lists, and the executive summary — deliberately not a dump of every ticket (that's already in the table above), built client-side from the same payload, nothing recomputed.
 
 What it deliberately does **not** do (see `frontend/CLAUDE.md`'s "Do NOT" list for the full set):

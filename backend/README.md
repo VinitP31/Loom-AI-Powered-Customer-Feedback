@@ -69,13 +69,15 @@ uvicorn main:app --reload --port 8000
 Then, in another terminal:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/analyze \
+curl -N -X POST http://127.0.0.1:8000/analyze \
   -F "file=@data/loom_dev_10.csv"
 ```
 
+(`-N` disables curl's output buffering so you see each line as it streams, not all at once at the end.)
+
 Interactive API docs (Swagger UI): open `http://127.0.0.1:8000/docs` in a browser.
 
-There is exactly one endpoint: `POST /analyze`. The system is stateless — no database, no session, the whole pipeline runs inside that one request and returns everything in one JSON payload.
+There is exactly one endpoint: `POST /analyze`. The system is stateless — no database, no session, the whole pipeline runs inside that one request. The response is streamed as newline-delimited JSON (NDJSON): a progress line each time a ticket finishes classification, one "summarizing" line, then a final line carrying the complete result — see Response Shape below.
 
 ---
 
@@ -85,7 +87,7 @@ There is exactly one endpoint: `POST /analyze`. The system is stateless — no d
 pytest
 ```
 
-49 tests, no real LLM calls, no API key needed to run them — every test that would otherwise touch the network gets a `FakeLLMClient` (`tests/conftest.py`) instead, a duck-typed stand-in exposing the same `structured_call`/`text_call` surface as the real `LLMClient`, configured per-test with canned responses. `LLM_MODEL`/`API_KEY` are still set to dummy values by an autouse fixture, since `utils/config.py` and `LLMClient.__init__` read them unconditionally — they're never actually sent anywhere in a test run.
+50 tests, no real LLM calls, no API key needed to run them — every test that would otherwise touch the network gets a `FakeLLMClient` (`tests/conftest.py`) instead, a duck-typed stand-in exposing the same `structured_call`/`text_call` surface as the real `LLMClient`, configured per-test with canned responses. `LLM_MODEL`/`API_KEY` are still set to dummy values by an autouse fixture, since `utils/config.py` and `LLMClient.__init__` read them unconditionally — they're never actually sent anywhere in a test run.
 
 | File | Covers |
 |---|---|
@@ -94,7 +96,7 @@ pytest
 | `test_schemas.py` | theme-belongs-to-category validation, the `Positive Feedback` cross-category exception, `sentiment_score` sign-agreement band, the fallback shape |
 | `test_analytics.py` | Denominator rule (percentages against `processed`, success rate against `total_uploaded`), the tie contract (`top_category`/`top_theme` null + leaders list), `fell_back_count`, `additional_issues` excluded from headline distributions |
 | `test_classify.py` | The validate → coerce → re-prompt(×1) → fallback sequence: first-try success, recovery via the one guaranteed re-prompt, exhaustion falling back cleanly, a malformed/no-tool-call response going through the same path as a validation failure, and batch ticket-independence |
-| `test_api.py` | `POST /analyze` end-to-end through FastAPI's `TestClient` — file-level error responses, a full success-path response shape, per-row `skipped_rows` detail, and row-level `warnings` (e.g. `duplicate_feedback`) reaching the item, not just the model, with `LLMClient` monkeypatched |
+| `test_api.py` | `POST /analyze` end-to-end through FastAPI's `TestClient` — file-level error responses, a full success-path response shape (parsed off the NDJSON stream's final "result" line), per-row `skipped_rows` detail, row-level `warnings` (e.g. `duplicate_feedback`) reaching the item, and that real progress events (one per finished ticket, then a "summarizing" line) arrive before the result — all with `LLMClient` monkeypatched |
 
 This deliberately isn't exhaustive coverage — it's a handful of tests per pipeline stage covering the scenarios `CLAUDE.md` calls out as load-bearing (the repair sequence, the tie contract, the denominator rule), not every possible input. Add to it as new edge cases turn up.
 
@@ -114,6 +116,19 @@ Empty file / zero rows → rejected (`4002`). A file with a valid `feedback` col
 ---
 
 ## Response Shape
+
+The HTTP response is a stream of newline-delimited JSON (NDJSON) — one request, one response, no polling and no second endpoint, it just isn't sent as a single blob. Two line types:
+
+```json
+{"type": "progress", "stage": "classifying", "done": 3, "total": 10}
+{"type": "progress", "stage": "summarizing", "done": 10, "total": 10}
+{"type": "result", "data": { /* the full payload below */ }}
+```
+
+- Zero or more `progress` lines: one each time a ticket actually finishes classification (`stage: "classifying"`, off the real `as_completed` worker-pool loop in `pipeline/classify.py` — not a fake timer), then exactly one more once the executive-summary call starts (`stage: "summarizing"`).
+- Exactly one final `result` line, whose `data` is the complete payload — identical in shape to what this endpoint returned in one shot before streaming existed.
+
+A client that doesn't care about progress can simply read the whole body and parse the last line's `data` — nothing about the final payload changed. `data` shape:
 
 ```json
 {
