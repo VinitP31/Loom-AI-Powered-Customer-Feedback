@@ -1,9 +1,15 @@
 """POST /analyze — the whole request/response cycle through FastAPI's
 TestClient. LLMClient is monkeypatched to a FakeLLMClient (tests/conftest.py)
 so no real network call or API key is ever needed. File-level validation
-errors don't need the LLM at all — they reject before classification runs."""
+errors don't need the LLM at all — they reject before classification runs.
+
+A successful response streams NDJSON: zero or more {"type": "progress", ...}
+lines followed by exactly one {"type": "result", "data": <AnalyzeResponse>}
+line — `_upload_events`/`_result_data` parse that stream so the rest of this
+file can assert on the same response shape as before streaming existed."""
 
 import io
+import json
 
 from fastapi.testclient import TestClient
 
@@ -27,6 +33,20 @@ def _upload(csv_text: str):
     return client.post(
         "/analyze", files={"file": ("test.csv", io.BytesIO(csv_text.encode()), "text/csv")}
     )
+
+
+def _upload_events(csv_text: str) -> list[dict]:
+    """For a successful (200) upload only — parses every NDJSON line."""
+    response = _upload(csv_text)
+    assert response.status_code == 200
+    lines = [line for line in response.text.splitlines() if line.strip()]
+    return [json.loads(line) for line in lines]
+
+
+def _result_data(events: list[dict]) -> dict:
+    result_events = [e for e in events if e["type"] == "result"]
+    assert len(result_events) == 1, "expected exactly one result event"
+    return result_events[0]["data"]
 
 
 def test_missing_feedback_column_returns_4001():
@@ -56,12 +76,10 @@ def test_successful_analysis_returns_full_payload(monkeypatch, fake_llm_client):
     fake_llm_client.text_responses = ["Both tickets report duplicate billing charges."]
     monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
 
-    response = _upload(
-        "id,feedback\n1,Charged twice this month.\n2,Billed twice again this cycle.\n"
+    body = _result_data(
+        _upload_events("id,feedback\n1,Charged twice this month.\n2,Billed twice again this cycle.\n")
     )
 
-    assert response.status_code == 200
-    body = response.json()
     assert body["validation_report"] == {
         "total_rows": 2,
         "processed": 2,
@@ -81,10 +99,8 @@ def test_skipped_rows_are_reported_but_dont_block_a_successful_response(monkeypa
     fake_llm_client.text_responses = ["One ticket processed."]
     monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
 
-    response = _upload("id,feedback\n1,Charged twice this month.\n2,\n")
+    body = _result_data(_upload_events("id,feedback\n1,Charged twice this month.\n2,\n"))
 
-    assert response.status_code == 200
-    body = response.json()
     assert body["validation_report"]["processed"] == 1
     assert body["validation_report"]["skipped"] == 1
     assert body["validation_report"]["skip_reasons"] == {"empty_or_null_feedback": 1}
@@ -96,11 +112,29 @@ def test_row_level_warnings_reach_the_item_not_just_the_model(monkeypatch, fake_
     fake_llm_client.text_responses = ["Both tickets report duplicate billing charges."]
     monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
 
-    response = _upload(
-        "id,feedback\n1,Charged twice this month.\n2,Charged twice this month.\n"
+    body = _result_data(
+        _upload_events("id,feedback\n1,Charged twice this month.\n2,Charged twice this month.\n")
     )
 
-    assert response.status_code == 200
-    body = response.json()
     assert body["items"][0]["warnings"] == []
     assert body["items"][1]["warnings"] == ["duplicate_feedback"]
+
+
+def test_progress_events_stream_before_the_result_and_reach_the_total(monkeypatch, fake_llm_client):
+    fake_llm_client.structured_responses = [VALID_RESPONSE, VALID_RESPONSE]
+    fake_llm_client.text_responses = ["Both tickets report duplicate billing charges."]
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+
+    events = _upload_events(
+        "id,feedback\n1,Charged twice this month.\n2,Billed twice again this cycle.\n"
+    )
+
+    classifying = [e for e in events if e.get("stage") == "classifying"]
+    summarizing = [e for e in events if e.get("stage") == "summarizing"]
+    assert len(classifying) == 2, "one real progress event per ticket that finishes, not a fake timer"
+    assert [e["done"] for e in classifying] == [1, 2]
+    assert all(e["total"] == 2 for e in classifying)
+    assert len(summarizing) == 1
+    assert summarizing[0] == {"type": "progress", "stage": "summarizing", "done": 2, "total": 2}
+    # Every progress event must come before the single result event.
+    assert [e["type"] for e in events] == ["progress"] * 3 + ["result"]

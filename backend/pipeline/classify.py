@@ -141,19 +141,23 @@ def classify_ticket(
     return fallback_classification(ticket_id, feedback_text, was_summarized)
 
 
-def classify_batch(
+def classify_batch_streaming(
     tickets: list[tuple[str, str, str, bool]],
     llm_client: LLMClient,
     max_concurrency: int = 5,
-) -> list[TicketClassification]:
-    """tickets: list of (ticket_id, text_to_classify, feedback_text,
-    was_summarized) in the order results should be returned. All tickets are
-    submitted to a single pool bounded only by max_concurrency in-flight
-    calls — no sub-batch boundary, so a finished worker immediately picks up
-    the next queued ticket instead of waiting on stragglers from a prior
-    group. classify_ticket() never raises, so one bad ticket cannot affect
-    any other."""
-    results: list[TicketClassification | None] = [None] * len(tickets)
+):
+    """Generator form of classify_batch — yields a progress event each time
+    a ticket actually finishes (real signal off the same as_completed loop,
+    not a fake timer), then a final event carrying the ordered results.
+    Exists so api/routes.py can stream real per-ticket progress on
+    /analyze; classify_batch below is unchanged and just drains this.
+
+    Yields: {"type": "progress", "done": int, "total": int}
+            {"type": "complete", "results": list[TicketClassification]}
+    """
+    total = len(tickets)
+    results: list[TicketClassification | None] = [None] * total
+    done = 0
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
         future_to_index = {
             executor.submit(
@@ -169,4 +173,28 @@ def classify_batch(
             except Exception:
                 logger.exception("ticket %s: unexpected error in pool worker", ticket_id)
                 results[index] = fallback_classification(ticket_id, feedback_text, was_summarized)
+            done += 1
+            yield {"type": "progress", "done": done, "total": total}
+    yield {"type": "complete", "results": results}
+
+
+def classify_batch(
+    tickets: list[tuple[str, str, str, bool]],
+    llm_client: LLMClient,
+    max_concurrency: int = 5,
+) -> list[TicketClassification]:
+    """tickets: list of (ticket_id, text_to_classify, feedback_text,
+    was_summarized) in the order results should be returned. All tickets are
+    submitted to a single pool bounded only by max_concurrency in-flight
+    calls — no sub-batch boundary, so a finished worker immediately picks up
+    the next queued ticket instead of waiting on stragglers from a prior
+    group. classify_ticket() never raises, so one bad ticket cannot affect
+    any other.
+
+    Non-streaming callers (CLI, tests) drain classify_batch_streaming and
+    keep only its final "complete" event — same single core loop either way."""
+    results: list[TicketClassification] = []
+    for event in classify_batch_streaming(tickets, llm_client, max_concurrency):
+        if event["type"] == "complete":
+            results = event["results"]
     return results

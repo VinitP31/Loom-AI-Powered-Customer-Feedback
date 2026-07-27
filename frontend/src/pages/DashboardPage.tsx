@@ -16,7 +16,7 @@ import ExportButton from "../components/ExportButton";
 import type { Category, Sentiment, Theme, Urgency } from "../types/taxonomy";
 
 export default function DashboardPage() {
-  const { status, data, error, fileName, analyze } = useAnalyze();
+  const { status, data, error, fileName, progress, analyze } = useAnalyze();
   const [activeCategory, setActiveCategory] = useState<Category | "All">("All");
   const [activeTheme, setActiveTheme] = useState<Theme | "All">("All");
   const [activeSentiment, setActiveSentiment] = useState<Sentiment | "All">("All");
@@ -59,11 +59,18 @@ export default function DashboardPage() {
       <Nav status={status} onFile={handleFile} />
 
       <main className="mx-auto max-w-[1400px] px-6 pb-8">
-        <AmbientStatus status={status} fileName={fileName} onFile={handleFile} />
+        <AmbientStatus status={status} fileName={fileName} progress={progress} onFile={handleFile} />
 
         {status === "loading" && (
           <div className="mb-2 h-1 w-full overflow-hidden rounded-full bg-surface-2">
-            <div className="loading-bar-fill h-full w-1/3 rounded-full bg-accent" />
+            {progress ? (
+              <div
+                className="h-full rounded-full bg-accent transition-[width] duration-200 ease-out"
+                style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }}
+              />
+            ) : (
+              <div className="loading-bar-fill h-full w-1/3 rounded-full bg-accent" />
+            )}
           </div>
         )}
 

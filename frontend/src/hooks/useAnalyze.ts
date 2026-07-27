@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useState } from "react";
-import { analyzeCsv, AnalyzeApiError } from "../api/analyzeClient";
+import { analyzeCsv, AnalyzeApiError, type AnalyzeProgress } from "../api/analyzeClient";
 import type { AnalyzeResponse } from "../types/analyze";
 
 export type AnalyzeStatus = "idle" | "loading" | "success" | "error";
@@ -16,6 +16,10 @@ export interface UseAnalyzeState {
   data: AnalyzeResponse | null;
   error: string | null;
   fileName: string | null;
+  /** Real per-ticket progress off the streamed /analyze response — null
+   * before the first ticket finishes (validation/redaction is fast, so
+   * that window is brief) and while idle/success/error. */
+  progress: AnalyzeProgress | null;
   analyze: (file: File) => Promise<void>;
   reset: () => void;
 }
@@ -25,13 +29,15 @@ export function useAnalyze(): UseAnalyzeState {
   const [data, setData] = useState<AnalyzeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [progress, setProgress] = useState<AnalyzeProgress | null>(null);
 
   const analyze = useCallback(async (file: File) => {
     setStatus("loading");
     setError(null);
     setFileName(file.name);
+    setProgress(null);
     try {
-      const result = await analyzeCsv(file);
+      const result = await analyzeCsv(file, setProgress);
       setData(result);
       setStatus("success");
     } catch (err) {
@@ -40,6 +46,8 @@ export function useAnalyze(): UseAnalyzeState {
       setError(message);
       setData(null);
       setStatus("error");
+    } finally {
+      setProgress(null);
     }
   }, []);
 
@@ -48,7 +56,8 @@ export function useAnalyze(): UseAnalyzeState {
     setData(null);
     setError(null);
     setFileName(null);
+    setProgress(null);
   }, []);
 
-  return { status, data, error, fileName, analyze, reset };
+  return { status, data, error, fileName, progress, analyze, reset };
 }

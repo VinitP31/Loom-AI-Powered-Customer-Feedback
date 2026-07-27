@@ -2,19 +2,32 @@
 long-ticket routing -> classify -> analytics -> executive summary into a
 single stateless request/response cycle (no upload_id, no session state).
 
+Streamed as newline-delimited JSON (NDJSON): one line per ticket that
+finishes classification (real progress, straight off classify_batch_streaming's
+as_completed loop — never a fake timer), one "summarizing" stage line, then
+a final line carrying the exact same payload this endpoint used to return
+in one shot. Still one POST, one request, no job_id, no polling — the
+stream only exists for the lifetime of this one response.
+
 Timing itself belongs in main.py per CLAUDE.md ("time.perf_counter() at
 the API boundary, not inside the pipeline") — this module only orchestrates.
+Note: main.py's timing middleware measures until the response object is
+handed back, not until a streamed body finishes sending, so its logged
+duration under-counts for this endpoint now — a pre-existing Starlette
+streaming-response characteristic, not something patched here.
 """
 
 import io
+import json
 import logging
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 
 from analytics.aggregate import compute_analytics
 from api.response_models import AnalyzeResponse, SkippedRowOut, ValidationReportOut
-from pipeline.classify import classify_batch
+from pipeline.classify import classify_batch_streaming
 from pipeline.preprocess import clean_and_redact, is_long_ticket
 from pipeline.summarize import generate_executive_summary, maybe_summarize
 from pipeline.validate import FileValidationError, validate_csv
@@ -26,8 +39,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/analyze", response_model=AnalyzeResponse)
-async def analyze(file: UploadFile) -> AnalyzeResponse:
+def _ndjson_line(payload: dict) -> str:
+    return json.dumps(payload) + "\n"
+
+
+@router.post("/analyze")
+async def analyze(file: UploadFile) -> StreamingResponse:
     config = load_config()
 
     raw_bytes = await file.read()
@@ -67,29 +84,44 @@ async def analyze(file: UploadFile) -> AnalyzeResponse:
         )
         prepared.append((row.ticket_id, text_to_classify, cleaned, was_summarized))
 
-    classifications = classify_batch(prepared, llm_client, max_concurrency=config.max_concurrency)
-    # Attach each row's validate.py quality flags (never seen by the model)
-    # after classification — `prepared`/`classifications` share report.valid_rows'
-    # order, so zip is safe.
-    classifications = [
-        c.model_copy(update={"warnings": row.warnings}) for c, row in zip(classifications, report.valid_rows)
-    ]
+    def event_stream():
+        classifications = []
+        for event in classify_batch_streaming(prepared, llm_client, max_concurrency=config.max_concurrency):
+            if event["type"] == "progress":
+                yield _ndjson_line(
+                    {"type": "progress", "stage": "classifying", "done": event["done"], "total": event["total"]}
+                )
+            else:
+                classifications = event["results"]
 
-    facts = compute_analytics(classifications, report)
-    summary = generate_executive_summary(facts, llm_client, model=config.summary_model)
+        # Attach each row's validate.py quality flags (never seen by the
+        # model) after classification — prepared/classifications share
+        # report.valid_rows' order, so zip is safe.
+        enriched = [
+            c.model_copy(update={"warnings": row.warnings}) for c, row in zip(classifications, report.valid_rows)
+        ]
 
-    return AnalyzeResponse(
-        validation_report=ValidationReportOut(
-            total_rows=report.total_rows,
-            processed=report.processed,
-            skipped=report.skipped,
-            skip_reasons=report.skip_reasons,
-            skipped_rows=[
-                SkippedRowOut(ticket_id=row.ticket_id, reason=row.reason) for row in report.skipped_rows
-            ],
-            fell_back_count=facts["fell_back_count"],
-        ),
-        items=classifications,
-        analytics=facts,
-        summary=summary,
-    )
+        facts = compute_analytics(enriched, report)
+
+        total = len(prepared)
+        yield _ndjson_line({"type": "progress", "stage": "summarizing", "done": total, "total": total})
+        summary = generate_executive_summary(facts, llm_client, model=config.summary_model)
+
+        response = AnalyzeResponse(
+            validation_report=ValidationReportOut(
+                total_rows=report.total_rows,
+                processed=report.processed,
+                skipped=report.skipped,
+                skip_reasons=report.skip_reasons,
+                skipped_rows=[
+                    SkippedRowOut(ticket_id=row.ticket_id, reason=row.reason) for row in report.skipped_rows
+                ],
+                fell_back_count=facts["fell_back_count"],
+            ),
+            items=enriched,
+            analytics=facts,
+            summary=summary,
+        )
+        yield _ndjson_line({"type": "result", "data": json.loads(response.model_dump_json())})
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
