@@ -67,6 +67,7 @@ def test_successful_analysis_returns_full_payload(monkeypatch, fake_llm_client):
         "processed": 2,
         "skipped": 0,
         "skip_reasons": {},
+        "skipped_rows": [],
         "fell_back_count": 0,
     }
     assert len(body["items"]) == 2
@@ -87,3 +88,19 @@ def test_skipped_rows_are_reported_but_dont_block_a_successful_response(monkeypa
     assert body["validation_report"]["processed"] == 1
     assert body["validation_report"]["skipped"] == 1
     assert body["validation_report"]["skip_reasons"] == {"empty_or_null_feedback": 1}
+    assert body["validation_report"]["skipped_rows"] == [{"ticket_id": "2", "reason": "empty_or_null_feedback"}]
+
+
+def test_row_level_warnings_reach_the_item_not_just_the_model(monkeypatch, fake_llm_client):
+    fake_llm_client.structured_responses = [VALID_RESPONSE, VALID_RESPONSE]
+    fake_llm_client.text_responses = ["Both tickets report duplicate billing charges."]
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+
+    response = _upload(
+        "id,feedback\n1,Charged twice this month.\n2,Charged twice this month.\n"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["items"][0]["warnings"] == []
+    assert body["items"][1]["warnings"] == ["duplicate_feedback"]

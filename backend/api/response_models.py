@@ -9,11 +9,17 @@ from pydantic import BaseModel
 from schemas.models import TicketClassification
 
 
+class SkippedRowOut(BaseModel):
+    ticket_id: str
+    reason: str
+
+
 class ValidationReportOut(BaseModel):
     total_rows: int
     processed: int
     skipped: int
     skip_reasons: dict[str, int]
+    skipped_rows: list[SkippedRowOut]
     fell_back_count: int
 
 

@@ -13,7 +13,7 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, UploadFile
 
 from analytics.aggregate import compute_analytics
-from api.response_models import AnalyzeResponse, ValidationReportOut
+from api.response_models import AnalyzeResponse, SkippedRowOut, ValidationReportOut
 from pipeline.classify import classify_batch
 from pipeline.preprocess import clean_and_redact, is_long_ticket
 from pipeline.summarize import generate_executive_summary, maybe_summarize
@@ -68,6 +68,12 @@ async def analyze(file: UploadFile) -> AnalyzeResponse:
         prepared.append((row.ticket_id, text_to_classify, cleaned, was_summarized))
 
     classifications = classify_batch(prepared, llm_client, max_concurrency=config.max_concurrency)
+    # Attach each row's validate.py quality flags (never seen by the model)
+    # after classification — `prepared`/`classifications` share report.valid_rows'
+    # order, so zip is safe.
+    classifications = [
+        c.model_copy(update={"warnings": row.warnings}) for c, row in zip(classifications, report.valid_rows)
+    ]
 
     facts = compute_analytics(classifications, report)
     summary = generate_executive_summary(facts, llm_client, model=config.summary_model)
@@ -78,6 +84,9 @@ async def analyze(file: UploadFile) -> AnalyzeResponse:
             processed=report.processed,
             skipped=report.skipped,
             skip_reasons=report.skip_reasons,
+            skipped_rows=[
+                SkippedRowOut(ticket_id=row.ticket_id, reason=row.reason) for row in report.skipped_rows
+            ],
             fell_back_count=facts["fell_back_count"],
         ),
         items=classifications,

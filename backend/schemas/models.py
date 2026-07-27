@@ -94,6 +94,10 @@ class TicketClassification(ClassificationOutput):
     ticket_id: str
     feedback_text: str
     was_summarized: bool
+    # Row-level quality flags from validate.py (html_present, markdown_present,
+    # duplicate_feedback, long_ticket) — attached post-classification in
+    # api/routes.py via model_copy, never produced or seen by the model.
+    warnings: list[str] = []
 
 
 def fallback_classification(
