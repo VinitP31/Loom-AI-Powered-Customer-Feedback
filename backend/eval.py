@@ -128,6 +128,10 @@ def run(feedback_csv: Path, answer_key_csv: Path) -> None:
     per_theme_total: dict[str, int] = {}
     per_theme_correct: dict[str, int] = {}
     mismatches: list[str] = []
+    # category/theme get one combined mismatch line above (a wrong theme
+    # usually means a wrong category too); sentiment/urgency/actionable are
+    # independent fields, so each gets its own mismatch list.
+    field_mismatches: dict[str, list[str]] = {"sentiment": [], "urgency": [], "actionable": []}
 
     for tid, exp in scorable.items():
         actual = by_id[tid]
@@ -145,12 +149,32 @@ def run(feedback_csv: Path, answer_key_csv: Path) -> None:
         if theme_ok:
             correct["theme"] += 1
             per_theme_correct[exp_theme] = per_theme_correct.get(exp_theme, 0) + 1
-        if _actual_value(actual, "sentiment") == exp["sentiment"]:
+
+        sentiment_actual = _actual_value(actual, "sentiment")
+        if sentiment_actual == exp["sentiment"]:
             correct["sentiment"] += 1
-        if _actual_value(actual, "urgency") == exp["urgency"]:
+        else:
+            field_mismatches["sentiment"].append(
+                f"  {tid} [{exp['case_type']}]: expected {exp['sentiment']}, got {sentiment_actual}"
+            )
+
+        urgency_actual = _actual_value(actual, "urgency")
+        if urgency_actual == exp["urgency"]:
             correct["urgency"] += 1
-        if _actual_value(actual, "actionable") == _normalize_actionable(exp["actionable"]):
+        else:
+            field_mismatches["urgency"].append(
+                f"  {tid} [{exp['case_type']}]: expected {exp['urgency']}, got {urgency_actual} "
+                f"(category: {exp_category}/{exp_theme})"
+            )
+
+        actionable_actual = _actual_value(actual, "actionable")
+        expected_actionable = _normalize_actionable(exp["actionable"])
+        if actionable_actual == expected_actionable:
             correct["actionable"] += 1
+        else:
+            field_mismatches["actionable"].append(
+                f"  {tid} [{exp['case_type']}]: expected {expected_actionable}, got {actionable_actual}"
+            )
 
         if not (category_ok and theme_ok):
             mismatches.append(
@@ -183,6 +207,13 @@ def run(feedback_csv: Path, answer_key_csv: Path) -> None:
         print(f"=== Category/theme mismatches ({len(mismatches)}) ===")
         print("\n".join(mismatches))
         print()
+
+    for field in ("sentiment", "urgency", "actionable"):
+        rows = field_mismatches[field]
+        if rows:
+            print(f"=== {field.capitalize()} mismatches ({len(rows)}) ===")
+            print("\n".join(rows))
+            print()
 
     if unlabeled:
         print(f"Note: {len(unlabeled)} classified ticket(s) have no answer-key row — not scored: {sorted(unlabeled)}")
