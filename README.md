@@ -50,6 +50,8 @@ I built this end to end — backend pipeline, prompt design, and the React front
 
 ![The generated PDF report](docs/screenshots/export-pdf-report.png)
 
+**Every upload is remembered.** Each `/analyze` call now persists its result to Postgres. A "History (N)" toggle — collapsed by default, never shown on the idle landing screen — expands into a list of every past upload by filename and timestamp; clicking one replays that week's own dashboard read-only, including its own ticket table. The live dashboard also gets an automatic **"Vs Last Week"** section: before → after values (never a bare delta), colored by whether the change is actually good or bad news for that specific metric — a dropping High Urgency count is green, not red, just because the number went down. The executive summary narrates this shift too ("negative sentiment fell from 70% to 33%"), grounded in the same computed numbers, never invented.
+
 ---
 
 ## Why it's built this way
@@ -72,6 +74,7 @@ If you want the full reasoning behind any of this — including the tradeoffs I 
 ```text
                          +----------------------+
                          |   React Dashboard    |
+                         |  (+ History Sidebar) |
                          +----------+-----------+
                                     |
                                REST API (POST /analyze, one call)
@@ -95,9 +98,16 @@ If you want the full reasoning behind any of this — including the tradeoffs I 
                                               Executive Summary (LLM)
                                                          |
                                                  Dashboard Response
+                                                         |
+                                                         v
+                                            +------------------------+
+                                            |  Postgres (storage/)   |
+                                            |  analysis_snapshots    |
+                                            |  ticket_items          |
+                                            +------------------------+
 ```
 
-The whole pipeline runs inside one stateless request. There's no database, no job queue, no `upload_id` — you send a CSV, the response streams real per-ticket progress as classification runs, and the final line carries the complete payload the frontend renders from.
+The classification pipeline itself still runs inside one request — you send a CSV, the response streams real per-ticket progress as classification runs, and the final line carries the complete payload the frontend renders from. What's new: that same call now also persists its result to Postgres on the way out, and three small read/delete endpoints (`GET /uploads`, `GET /uploads/{id}`, `DELETE /uploads/{id}`) exist purely to browse and manage that history — there's still no `upload_id` you pass *in* to `/analyze`.
 
 ### The pipeline, stage by stage
 
@@ -118,12 +128,13 @@ The whole pipeline runs inside one stateless request. There's no database, no jo
 | Backend | Python 3.12, FastAPI | Async, typed, automatic OpenAPI docs |
 | Validation | Pydantic v2 | Schema enforcement *is* the closed-vocabulary guarantee |
 | Data handling | Pandas | CSV parsing |
+| Persistence | Postgres (`psycopg` v3) | Multi-week history — snapshots + per-ticket items; `pgvector` installed alongside for the planned RAG phase |
 | AI | OpenAI (`gpt-4o-mini` by default) | Structured output via forced function-calling — no free-text parsing |
 | Frontend | React 19 + TypeScript, Vite | Modular, type-safe UI, fast dev loop |
 | Styling | Tailwind CSS v4 | Design tokens as CSS custom properties → light/dark theming with no per-component variants |
 | Charts | Recharts | Declarative, accessible, labeled by default |
 | Export | jsPDF + jspdf-autotable | Client-side PDF report generation — no server round-trip |
-| Backend tests | pytest | 50 tests, no real LLM calls needed to run them |
+| Backend tests | pytest | 68 tests, no real LLM calls needed to run them |
 | Frontend tests | Vitest + Testing Library + jsdom | Real component interactions against payloads captured from the live backend |
 
 ---
@@ -186,7 +197,7 @@ If both are running and you can upload `backend/data/loom_dev_10.csv` and see a 
 
 ## The API contract
 
-Exactly one endpoint. Request: multipart CSV. Response: streamed as newline-delimited JSON (NDJSON) — a progress line each time a ticket finishes classification, one "summarizing" line, then a final line carrying the payload below. Still one request, one response, no polling, no second endpoint:
+The core analysis is still one endpoint. Request: multipart CSV. Response: streamed as newline-delimited JSON (NDJSON) — a progress line each time a ticket finishes classification, one "summarizing" line, then a final line carrying the payload below. Still one request, one response, no polling:
 
 ```json
 {"type": "progress", "stage": "classifying", "done": 3, "total": 10}
@@ -229,7 +240,10 @@ Exactly one endpoint. Request: multipart CSV. Response: streamed as newline-deli
     "actionable_pct": 90.0,
     "processing_success_rate": 90.9
   },
-  "summary": "The customer feedback analysis reveals a significant concern in the areas of Billing & Payments and Functional Issues..."
+  "summary": "The customer feedback analysis reveals a significant concern in the areas of Billing & Payments and Functional Issues...",
+  "upload_id": 42,
+  "uploaded_at": "2026-07-28T12:16:55.545472+05:30",
+  "comparison": null
 }
 ```
 
@@ -240,6 +254,11 @@ A few things worth knowing before you consume this response:
 - **`additional_issues`** holds secondary issues on multi-issue tickets — never counted in headline distributions, only shown when you expand a ticket.
 - **`validation_report.skipped_rows`** and each item's **`warnings`** (`html_present`, `markdown_present`, `duplicate_feedback`, `long_ticket`) exist so the dashboard can show *which* row was dropped or flagged, not just an aggregate count — never derived by the model, attached from `pipeline/validate.py`'s row-level checks.
 - **File-level rejections are `4001`/`4002`/`4003`** (missing `feedback` column / empty file / no usable rows). Every other failure — a bad model response, a timeout — resolves internally to a fallback classification; the endpoint still returns `200`, with `fell_back_count` telling you how many tickets needed it.
+- **`upload_id`/`uploaded_at`/`comparison` are new.** `upload_id` is the row this got saved as (`GET /uploads/{upload_id}` replays it later). `comparison` is `null` only on the very first upload ever — otherwise it's the week-over-week diff against whatever was previously most recent, with before/after values for every metric, not just a bare delta. Full shape in [`backend/README.md`](backend/README.md#response-shape).
+
+### History endpoints
+
+`GET /uploads` lists every past upload (id, timestamp, filename), newest first. `GET /uploads/{id}` replays one past upload's full dashboard read-only — same shape as above, including its own `items` and its own `comparison` exactly as it was computed at the time (not recomputed against today's latest). `DELETE /uploads/{id}` permanently deletes it (204) and cascades to its stored tickets.
 
 Full schema, every field, and the reasoning behind each rule: [`backend/README.md`](backend/README.md#response-shape).
 
@@ -250,9 +269,11 @@ Full schema, every field, and the reasoning behind each rule: [`backend/README.m
 ```text
 Loom-AI-Powered-Customer-Feedback/
 ├── backend/            FastAPI service — validation, PII redaction, classification,
-│                       analytics, executive summary. See backend/README.md.
+│                       analytics, executive summary, Postgres persistence (storage/).
+│                       See backend/README.md.
 ├── frontend/           React + TypeScript dashboard — one POST /analyze call,
-│                       renders everything from the response. See frontend/README.md.
+│                       renders everything from the response, plus a history sidebar
+│                       reading GET /uploads. See frontend/README.md.
 ├── docs/
 │   ├── Loom_Source_of_Truth.md   Full design rationale — the document that wins
 │   │                             if anything else (including this README) disagrees
@@ -268,9 +289,9 @@ Each service's own README is the maintained source of truth for its file-level s
 
 Both halves have a real, currently-passing test suite — not aspirational, not skipped, checked as part of building this.
 
-**Backend** — `cd backend && pytest` → 50 tests, zero real LLM calls (a duck-typed `FakeLLMClient` stands in wherever classification/summarization would otherwise fire). Covers file/row validation, PII redaction boundaries, the theme-category and sentiment-score schema validators, the analytics tie contract, the full validate → coerce → re-prompt → fallback repair sequence, row-level `warnings` reaching the item, that real per-ticket progress events stream before the result, and the `/analyze` endpoint end to end.
+**Backend** — `cd backend && pytest` → 68 tests, zero real LLM calls (a duck-typed `FakeLLMClient` stands in wherever classification/summarization would otherwise fire; a real local Postgres backs the persistence tests, isolated to a separate `loom_test` database, truncated between tests). Covers file/row validation, PII redaction boundaries (including the parenthesized-phone-number regex fix), the theme-category and sentiment-score schema validators, the analytics tie contract, the full validate → coerce → re-prompt → fallback repair sequence, the LLM client's retry/backoff/auth-no-retry behavior, the executive summary's deterministic fallback path, row-level `warnings` reaching the item, that real per-ticket progress events stream before the result, the week-over-week comparison (before/after values, persisted-not-recomputed on replay), delete-with-cascade, and the `/analyze` + `/uploads` endpoints end to end.
 
-**Frontend** — `cd frontend && npm test` → Vitest + Testing Library, driving real interactions (upload, search, sort, filter, expand a row, **click an actual rendered chart bar and confirm the table narrows**) against `/analyze` payloads captured verbatim from the live backend, not hand-guessed mocks.
+**Frontend** — `cd frontend && npm test` → 26 tests, Vitest + Testing Library, driving real interactions (upload, search, sort, filter, expand a row, **click an actual rendered chart bar and confirm the table narrows**, expand the history sidebar, delete-confirm Yes/No) against `/analyze` payloads captured verbatim from the live backend, not hand-guessed mocks.
 
 Neither suite is exhaustive by design — a handful of tests per concern, chosen to cover the scenarios that are actually load-bearing (the repair sequence, the tie contract, the denominator rule), not every conceivable input. See each README's Testing section for the full breakdown of what's covered and why.
 
@@ -281,10 +302,12 @@ Neither suite is exhaustive by design — a handful of tests per concern, chosen
 Documented honestly rather than hidden — full detail in [`backend/README.md`](backend/README.md#known-limitations) and [`docs/Loom_Source_of_Truth.md`](docs/Loom_Source_of_Truth.md):
 
 - Dense multi-issue tickets (3+ distinct problems in one message) have inherent primary-issue ambiguity — the model picks one, reasonably, but not by a formula I can fully specify.
-- The `[ID]` PII redaction heuristic is a 5–6 digit-length pattern, not true ID-format matching — it can false-positive on an incidental number that happens to be 5–6 digits.
+- The `[ID]` PII redaction heuristic is a 5–6 digit-length pattern, not true ID-format matching — it can false-positive on an incidental number that happens to be 5–6 digits; a 7-12 digit non-phone identifier (e.g. an invoice number) is similarly mislabeled `[PHONE]`.
 - `New Feature Request` vs. `Enhancement Request` is a genuinely fuzzy boundary on some tickets, left unresolved rather than force-forwarded to a fake bright line.
-- No auth, no database, no persistence — by design for this scope, not an oversight. CORS is currently permissive (`*`) for local/demo use; lock it down before any real deployment.
+- No auth — by design for this scope, not an oversight. `DELETE /uploads/{id}` in particular has no ownership check; fine for a local single-user tool, not fine if this port is ever exposed publicly. CORS is currently permissive (`*`) for local/demo use; lock it down before any real deployment.
 - **No API rate limiting** — `/analyze` has no per-client throttle. `MAX_CONCURRENCY` bounds in-flight LLM calls *within* one request, but nothing bounds how many requests can run at once. Fine for local/demo use; add rate limiting before any public or multi-tenant deployment, both to protect cost and to stay under the LLM provider's quota. Tracked as future scope in [`docs/Loom_Source_of_Truth.md`](docs/Loom_Source_of_Truth.md).
+- **Two concurrent uploads can race on "previous snapshot."** Two simultaneous `/analyze` calls can both compute their week-over-week comparison against the same prior upload rather than against each other. No ticket data is corrupted — only which upload a comparison is diffed against — and it's a non-issue for a single-user local tool. Deliberately not fixed; see `docs/Loom_Source_of_Truth.md`.
+- **Feedback text now persists at rest**, not just in-memory for one request (`ticket_items`). Redaction happens before storage, same as before storage existed, but redaction is a heuristic, not perfect (see above) — a real retention/deletion policy is worth deciding before this holds real customer data at any scale beyond local dev.
 
 ---
 

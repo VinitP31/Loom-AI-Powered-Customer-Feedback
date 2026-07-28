@@ -38,7 +38,7 @@ Change it if your backend runs somewhere other than the default `uvicorn main:ap
 
 ## Running it
 
-Start the backend first — see `backend/README.md` (`uvicorn main:app --reload --port 8000` from `backend/`). Nothing in the frontend works without it; the dashboard makes exactly one network call, `POST /analyze`, and has no fallback data source.
+Start the backend first — see `backend/README.md` (`uvicorn main:app --reload --port 8000` from `backend/`). Nothing in the frontend works without it. Analyzing a CSV is still exactly one network call, `POST /analyze`; separately, the history sidebar reads (`GET /uploads`, `GET /uploads/{id}`) and deletes (`DELETE /uploads/{id}`) from the same backend, and needs Postgres running behind it (see `backend/README.md`'s Requirements) or those calls will fail — the history sidebar just fails quietly and stays empty in that case, it doesn't block the main upload flow.
 
 ```bash
 npm run dev
@@ -80,19 +80,25 @@ The test suite itself drives real interactions through the real component tree �
 ```
 src/
 ├── api/
-│   └── analyzeClient.ts       # the one POST /analyze call; reads the streamed NDJSON body
-│                              # line-by-line (progress callback + final result), falls back
-│                              # to a plain res.json() if there's no body reader; throws
-│                              # AnalyzeApiError with the backend's error_code/message on a 4xx
+│   ├── analyzeClient.ts       # the one POST /analyze call; reads the streamed NDJSON body
+│   │                          # line-by-line (progress callback + final result), falls back
+│   │                          # to a plain res.json() if there's no body reader; throws
+│   │                          # AnalyzeApiError with the backend's error_code/message on a 4xx
+│   └── uploadsClient.ts       # GET /uploads (list), GET /uploads/{id} (replay),
+│                              # DELETE /uploads/{id} — history browsing, never calls the LLM
 ├── hooks/
-│   └── useAnalyze.ts          # owns request status (idle/loading/success/error), real
-│                              # progress ({stage, done, total} off the stream), and the
-│                              # response payload — no polling, no persistence
+│   ├── useAnalyze.ts          # owns request status (idle/loading/success/error), real
+│   │                          # progress ({stage, done, total} off the stream), and the
+│   │                          # response payload — no polling, no persistence
+│   └── useUploadHistory.ts    # owns the past-uploads list, which one (if any) is being
+│                              # replayed (selectedId === null means "viewing live"), the
+│                              # fetched historical snapshot, and delete
 ├── types/
 │   ├── taxonomy.ts            # Category/Theme/Sentiment/Urgency string unions, mirrored
 │   │                          # character-for-character from backend/schemas/taxonomy.py
 │   └── analyze.ts             # full /analyze response shape (ValidationReport,
-│                              # TicketClassification, Analytics, AnalyzeResponse)
+│                              # TicketClassification, Analytics, AnalyzeResponse, Comparison,
+│                              # UploadSummary, HistoricalSnapshot)
 ├── components/
 │   ├── Nav.tsx                # top bar: brand, dark-mode toggle, upload trigger
 │   ├── AmbientStatus.tsx      # borderless status line below Nav (batch name + stage text —
@@ -117,7 +123,19 @@ src/
 │   │                          # search/sort change or a new upload)
 │   ├── ExportButton.tsx       # exports the current analysis as a PDF report (KPIs +
 │   │                          # distributions + skipped/needs-review lists + summary —
-│   │                          # see utils/exportReport.ts)
+│   │                          # see utils/exportReport.ts); works on a live payload or a
+│   │                          # HistoricalSnapshot alike
+│   ├── WeekComparison.tsx     # "Vs Last Week" — renders `comparison` when non-null, on the
+│   │                          # live dashboard and on a historical replay that had one.
+│   │                          # Before→after value + a two-bar mini chart per tile, colored
+│   │                          # by whether the direction is good/bad news for THAT metric
+│   │                          # (a High Urgency drop is green, not red, despite the negative
+│   │                          # delta) — never by raw sign
+│   ├── HistorySidebar.tsx     # collapsed-by-default history list (toggled via a button that
+│   │                          # only appears once a dashboard is on screen, never on the idle
+│   │                          # landing page). Lists past uploads by filename + timestamp;
+│   │                          # click replays one read-only; a delete icon per row requires
+│   │                          # an inline Yes/No confirm before calling DELETE /uploads/{id}
 │   └── charts/
 │       ├── DistributionBarChart.tsx      # shared Recharts bar chart (labels, tooltip,
 │       │                                 # vertical gridlines, optional click-to-filter —
@@ -166,12 +184,14 @@ Mirrors `backend/README.md`'s Response Shape exactly (the frontend's `types/anal
 - **Executive summary** (`SummaryPanel`): the backend's grounded narrative, rendered as-is.
 - **Ticket table** (`FeedbackExplorer`): every processed ticket, searchable over feedback text, sortable, filterable by category/theme/sentiment/urgency/actionable, paginated (15/page, so a 100+ ticket batch doesn't dump one giant unbroken list), expandable to show `additional_issues`, with small badges for row-level `warnings` (`html`, `markdown`, `duplicate`) and a "summarized" badge for long tickets.
 - **Export** (`ExportButton`): a one-click PDF report of the KPIs, the four distributions, the skipped-rows and needs-review lists, and the executive summary — deliberately not a dump of every ticket (that's already in the table above), built client-side from the same payload, nothing recomputed.
+- **Vs Last Week** (`WeekComparison`): shown whenever `comparison` is non-null — on the live dashboard, and on any historical upload replayed via the sidebar that had one saved. Before→after value per metric plus a two-bar mini chart, never a bare delta.
+- **History sidebar** (`HistorySidebar`): collapsed by default. A "History (N)" toggle button only appears once a dashboard (live or replayed) is actually on screen — never on the idle landing page. Expanded, it lists every past upload; clicking one replays that week's own dashboard read-only (including its own ticket table, via persisted per-ticket data); a delete icon per row requires an inline confirm before permanently removing it.
 
 What it deliberately does **not** do (see `frontend/CLAUDE.md`'s "Do NOT" list for the full set):
-- Never calls an LLM or any AI service — it only renders what `/analyze` already returned.
-- Never makes more than one backend call per uploaded file — no polling, no `upload_id`, no second request.
-- Never recomputes an analytic the backend already sent (e.g. an average `sentiment_score`) — it displays backend-computed numbers, or at most a simple share computed against `processed` (never against `total_rows`).
-- Never persists anything client-side — a new upload just replaces the in-memory payload; refreshing the page returns to the empty state.
+- Never calls an LLM or any AI service — it only renders what the backend already returned.
+- Never makes more than one backend call per *analysis* — no polling, no second request for `/analyze` itself. (The history sidebar's own reads/delete are a separate, allowed concern — they never touch the LLM either.)
+- Never recomputes an analytic the backend already sent (e.g. an average `sentiment_score`, or the week-over-week `comparison`) — it displays backend-computed numbers, or at most a simple share computed against `processed` (never against `total_rows`).
+- Never adds its *own* client-side persistence layer (no localStorage/IndexedDB/cache) — the backend now persists history server-side, but the frontend still just fetches it fresh each time, the same way it's always fetched `/analyze`'s result.
 
 ---
 
@@ -196,3 +216,5 @@ That's the only configuration surface. There's no API key, no build-time secret,
 | A chart test renders nothing / can't find an SVG bar in a new test | jsdom needs the stubs in `src/test/setup.ts` (see "Why the tests need a stubbed browser") | Make sure the test imports through the normal Vitest setup (it's wired globally via `vitest.config.ts`'s `setupFiles`) rather than bypassing it |
 | Port already in use on `vite` | Another process on the default port | `npm run dev -- --port 5174` (or any free port) |
 | `tsc -b` fails referencing a `.test.tsx` file | Test files are included in `tsconfig.app.json`'s `src` include and type-checked like any other source file | Fix the type error in the test — it's a real one, not a build-config issue |
+| History toggle button never appears | No dashboard is on screen yet (idle landing page), or `GET /uploads` failed silently | Upload a CSV first (history only mounts on "screen 2"); check the Network tab for a failed `/uploads` call — usually means Postgres isn't running behind the backend, see `backend/README.md`'s Troubleshooting |
+| "Vs Last Week" section never shows up | This is the first upload ever (`comparison` is `null` by design), or you're viewing a historical upload that predates this feature | Upload a second CSV to see a real comparison |

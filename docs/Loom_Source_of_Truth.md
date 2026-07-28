@@ -46,6 +46,7 @@ These are governing constraints. Every implementation decision must be consisten
 ```text
                          +----------------------+
                          |   React Dashboard    |
+                         |  (+ History Sidebar) |
                          +----------+-----------+
                                     |
                                REST API
@@ -67,9 +68,20 @@ These are governing constraints. Every implementation decision must be consisten
                                                   Structured JSON
                                                          |
                                               Executive Summary (LLM)
+                                              (narrates vs-last-week
+                                               diff too, when one exists)
                                                          |
                                                  Dashboard Response
+                                                         |
+                                                         v
+                                          +--------------------------+
+                                          |   Postgres (storage/)    |
+                                          | analysis_snapshots       |
+                                          | ticket_items             |
+                                          +--------------------------+
 ```
+
+Every `/analyze` run persists its result (aggregate snapshot + per-ticket items + the week-over-week diff, all computed above) to Postgres before responding — this is a write on the way out, not a second request. See **Multi-Week Persistence** below for the full contract.
 
 ---
 
@@ -152,7 +164,7 @@ Regex-based redaction applied **before any text reaches the model**. This is a r
 
 Redact: email addresses, phone numbers, card-like numeric sequences, and numeric ID-length sequences. Replace with typed placeholders (`[EMAIL]`, `[PHONE]`, `[CARD]`, `[ID]`) so the model retains context that *a* value was present without seeing it.
 
-**Honest note on the `[ID]` heuristic:** it is a digit-length heuristic (5–6 digit runs), not true ID-pattern matching (no prefix/format awareness). It can false-positive on incidental 5–6 digit numbers that aren't identifiers at all (an amount, a date-like number). Accepted as a reasonable approximation, not a precise pattern matcher.
+**Honest note on the `[ID]` heuristic:** it is a digit-length heuristic (5–6 digit runs), not true ID-pattern matching (no prefix/format awareness). It can false-positive on incidental 5–6 digit numbers that aren't identifiers at all (an amount, a date-like number). A 7-12 digit non-phone identifier (e.g. an invoice number) is similarly mislabeled `[PHONE]`. Accepted as a reasonable approximation, not a precise pattern matcher. The digit-run regex does include parentheses in its character class specifically so a parenthesized area code, e.g. `(555) 123-4567`, is consumed as one run and fully redacted — an earlier version without parentheses left the area code un-redacted, a real leak rather than a labeling nuance, fixed once found.
 
 ### Stage 4 — Long-Ticket Routing
 
@@ -416,7 +428,7 @@ Computed in Python over validated results:
 - Top recurring themes
 - Top categories
 - `fell_back_count` — count of tickets that resolved to the fallback shape (== `Requires Human Review` count, per Fallback Shape). A quality signal for how much of the batch needs human attention, not an error metric.
-- `theme_sentiment_avg` — mean `sentiment_score` per primary theme (theme → one-decimal average), computed in Python over the per-ticket scores the model already returned. This is the "which issues are customers most unhappy about" signal — a theme with a very negative average is a priority even if its raw frequency isn't the highest. Never computed by the model (Core Principle 1).
+- `theme_sentiment_avg` — mean `sentiment_score` per primary theme (theme → one-decimal average), computed in Python over the per-ticket scores the model already returned. This is the "which issues are customers most unhappy about" signal — a theme with a very negative average is a priority even if its raw frequency isn't the highest. Never computed by the model (Core Principle 1). **Deliberately excluded from the executive-summary prompt's payload** (`prompts/executive_summary.py`) — a raw -1.0-to-+1.0 number reads as a confusing bare score in prose (e.g. "scored a sentiment of 1.0") with no context a stakeholder can interpret; it's kept in the API response for other consumers (e.g. a future per-theme chart) but structurally cannot reach the narration call.
 - Optionally, an average `sentiment_score` across processed tickets (single-batch; a time-windowed/weekly version requires persistence — see Deferred Extensions)
 
 **Top category/theme tie contract.** `top_category`/`top_theme` are populated ONLY when there is a single, unambiguous leader. On a tie for the highest count, both are `null`, and `category_leaders`/`theme_leaders` list every tied entry instead. Any consumer, including the frontend, must handle the `null` case explicitly and render the leaders list rather than assuming a singular winner always exists.
@@ -454,7 +466,9 @@ Computed in Python over validated results:
 | Urgency Breakdown (chart, donut) | Urgency aggregation |
 | Executive Summary (text) | Summary generator |
 | Validation status (skipped / needs-review toggles) | `validation_report.skipped_rows` and items whose `primary_theme` is `Requires Human Review` — each rendered as a toggle chip that expands the real row list, not just an aggregate count |
-| Feedback Explorer (table) | Structured feedback objects with search, sorting, filtering (category/theme/sentiment/urgency/actionable), and pagination (15 rows/page, resets to page 1 on any filter/search/sort change or a new upload — so a 100+ ticket batch never dumps one unbroken list) — search/filter operates on the `feedback_text` field now returned per item; `was_summarized` and row-level `warnings` are shown as badges |
+| Feedback Explorer (table) | Structured feedback objects with search, sorting, filtering (category/theme/sentiment/urgency/actionable), and pagination (15 rows/page, resets to page 1 on any filter/search/sort change or a new upload — so a 100+ ticket batch never dumps one unbroken list) — search/filter operates on the `feedback_text` field now returned per item; `was_summarized` and row-level `warnings` are shown as badges. Also renders on a historical replay (see Multi-Week Persistence), using that upload's persisted `items` |
+| Vs Last Week | Shown on the live dashboard (and preserved on replay of any upload that had one) when `comparison` is non-null. Each tile shows a before → after value plus a two-bar mini chart, colored by whether the metric's direction is actually good or bad news for that specific metric (e.g. a High Urgency count *dropping* is green, not red) — never a bare delta with no baseline. See Multi-Week Persistence for the full field list |
+| History Sidebar | Collapsed by default, toggled open via a "History (N)" button that only appears once a dashboard (live or replayed) is on screen — never shown on the idle landing screen. Lists every past upload by filename + timestamp; clicking one replays that upload's own dashboard read-only; a delete icon per row requires an inline Yes/No confirm before calling `DELETE /uploads/{id}` |
 
 Every chart must be self-explanatory: titled, axis-labeled, and interpretable by a stakeholder without a walkthrough. Bar charts additionally carry vertical gridlines for a scale reference and are keyboard-accessible (Tab + Enter/Space per bar), not mouse-only. The dashboard consumes processed API data only and issues no LLM calls.
 
@@ -462,17 +476,20 @@ Every chart must be self-explanatory: titled, axis-labeled, and interpretable by
 
 ## API Endpoints
 
-The system is **stateless** with no database, so the entire pipeline runs in a **single request**. The CSV is uploaded and fully processed in one call that returns everything the dashboard needs. The frontend holds the response in memory and renders from it; the dashboard issues no further calls.
+The classification pipeline itself still runs in a **single request** — the CSV is uploaded and fully processed in one call, streamed back as it progresses. What changed from the original stateless design: that same call now also **persists** its result to Postgres on the way out (see Multi-Week Persistence, next section), and three small read/delete endpoints exist purely to browse and manage that history. There is still no `upload_id` you pass *in* — `/analyze` never takes one — but the response now hands you back the `upload_id` it was saved as, for the history endpoints to use.
 
 | Endpoint | Purpose |
 |----------|---------|
-| `POST /analyze` | Upload a CSV and run the full pipeline; returns the complete result payload |
+| `POST /analyze` | Upload a CSV, run the full pipeline, persist the result; returns the complete result payload |
+| `GET /uploads` | List every past upload (id, timestamp, filename), newest first — powers the history sidebar |
+| `GET /uploads/{id}` | Replay one past upload's full dashboard read-only (aggregate + items + its own comparison, if it had one) |
+| `DELETE /uploads/{id}` | Permanently delete one upload and its ticket items (cascades) |
 
 ### `POST /analyze`
 
 **Request:** multipart CSV file.
 
-**Response:** streamed as newline-delimited JSON (NDJSON) — still one request, one response, no `upload_id`, no polling, no second endpoint; it just isn't sent as a single blob. A progress line each time a ticket finishes classification (off the real worker-pool `as_completed` loop in `pipeline/classify.py`, not a fake timer), one "summarizing" line, then a final line with the complete payload:
+**Response:** streamed as newline-delimited JSON (NDJSON) — still one request, one response; it just isn't sent as a single blob. A progress line each time a ticket finishes classification (off the real worker-pool `as_completed` loop in `pipeline/classify.py`, not a fake timer), one "summarizing" line, then a final line with the complete payload:
 
 ```json
 {"type": "progress", "stage": "classifying", "done": 42, "total": 97}
@@ -490,15 +507,81 @@ The system is **stateless** with no database, so the entire pipeline runs in a *
                 `warnings` list (html_present/markdown_present/duplicate_feedback/long_ticket)
                 from row-level validation, attached after classification, never model output */ ],
   "analytics": { /* category, sentiment, theme, urgency distributions and KPIs */ },
-  "summary": "Executive summary narrative..."
+  "summary": "Executive summary narrative — now also grounded in the week-over-week
+               diff below, when one exists (see Multi-Week Persistence)",
+  "upload_id": 42,
+  "uploaded_at": "2026-07-28T12:16:55.545472+05:30",
+  "comparison": { /* null on the very first upload ever — see Multi-Week Persistence
+                     for the full shape */ }
 }}
 ```
 
-A consumer that doesn't care about progress can read the whole body and parse only the last line's `data` — identical shape to what this endpoint returned in one shot before streaming existed.
+A consumer that doesn't care about progress can read the whole body and parse only the last line's `data`.
 
 **CORS** is currently permissive (`*`) for local/demo use; lock down to specific origin(s) before production deployment.
 
-**Why a single call, not upload → analyze → dashboard.** With no database, a two-step flow would require holding uploaded data in server-side memory between requests, keyed by an `upload_id`. That temporary state is fragile (lost on restart, absent on a second worker) and is session management the MVP does not need. A single stateless call matches the no-DB design honestly. The multi-request shape (`POST /upload` → `upload_id` → `POST /analyze` → `GET /dashboard`, `GET /summary`) becomes the natural design **once persistence is added** — it is listed with that deferred extension, not built now.
+---
+
+## Multi-Week Persistence
+
+Every `/analyze` call now persists its result to Postgres, turning Loom from a one-shot report generator into something that remembers and tracks itself over time: a history sidebar to reopen any past upload, and an automatic "vs last week" comparison on the current one. This section is the built contract — the plan that preceded it is superseded by what's described here.
+
+**Why Postgres, not SQLite.** SQLite was the original placeholder choice (see the old Deferred Extensions entry, now folded into this section). Postgres was chosen instead because RAG is planned on top of this same feature and needs to store + embed per-ticket text regardless — Postgres via the `pgvector` extension (already installed alongside the app) can hold those embeddings in the same database and even the same `ticket_items` table, rather than standing up a second storage system for RAG later.
+
+**Schema (`backend/storage/db.py`):**
+
+```text
+analysis_snapshots
+├── id                 SERIAL PRIMARY KEY
+├── uploaded_at        TIMESTAMPTZ, default now()
+├── source_filename    TEXT — the uploaded CSV's original filename
+├── validation_report  JSONB
+├── analytics          JSONB
+├── summary            TEXT
+└── comparison         JSONB, nullable — null only for the very first upload ever
+
+ticket_items
+├── id                 SERIAL PRIMARY KEY
+├── snapshot_id        INTEGER REFERENCES analysis_snapshots(id) ON DELETE CASCADE
+├── ticket_id          TEXT
+└── item               JSONB — the full per-ticket object (same shape as /analyze's `items[]`)
+```
+
+One `ticket_items` row per ticket per upload. `ON DELETE CASCADE` means deleting an upload deletes its tickets with it — no separate cleanup query. Schema is created/migrated via `ensure_schema()` at app startup (`CREATE TABLE IF NOT EXISTS` + `ADD COLUMN IF NOT EXISTS`), so an older running database picks up new columns/tables without a manual migration step.
+
+**One-upload-equals-one-week.** Each CSV's tickets are assumed to already fall within roughly one week's range — the upload itself is the week, identified by its own `uploaded_at` timestamp. There is no per-row date-bucketing logic; that's a deferred idea for a hypothetical future live/continuous-feed scenario, not needed for how the tool is actually used today (one batch upload at a time).
+
+**The week-over-week diff (`backend/storage/compare.py`).** On each new upload, *before* saving it, the backend reads whatever snapshot is currently the most recent one, and computes a diff between that snapshot's `analytics` and the new one's — pure Python over two already-computed aggregate dicts, no LLM involved. The diff carries both the delta AND the before/after absolute values for every metric — a bare `-36.7%` delta means nothing without knowing it moved from 70% to 33.3%, so both are always present:
+
+```json
+{
+  "previous_uploaded_at": "2026-07-28T12:15:53+05:30",
+  "sentiment_shift_pct": { "Positive": 56.7, "Negative": -36.7, "Neutral": -20.0 },
+  "sentiment_pct_before": { "Positive": 10.0, "Negative": 70.0, "Neutral": 20.0 },
+  "sentiment_pct_after":  { "Positive": 66.7, "Negative": 33.3, "Neutral": 0.0 },
+  "category_shift_pct": { /* per-category percentage-point delta */ },
+  "urgency_shift_count": { "High": -4, "Medium": -2, "Low": 5 },
+  "urgency_count_before": { "High": 4, "Medium": 4, "Low": 2 },
+  "urgency_count_after":  { "High": 0, "Medium": 2, "Low": 7 },
+  "new_themes": [ /* themes present this upload, absent last upload */ ],
+  "disappeared_themes": [ /* themes present last upload, absent this one */ ],
+  "high_urgency_count_delta": -4, "high_urgency_count_before": 4, "high_urgency_count_after": 0,
+  "actionable_pct_delta": -34.4, "actionable_pct_before": 90.0, "actionable_pct_after": 55.6,
+  "fell_back_count_delta": 0, "fell_back_count_before": 0, "fell_back_count_after": 0
+}
+```
+
+**"New/disappeared themes" is a plain set difference on `theme_frequency` keys — nothing more.** It means a theme had ≥1 ticket last upload and 0 this upload (or vice versa), not a verified fix or a confirmed new problem. At small batch sizes (10-100 tickets) this can just as easily be sampling variation as a real change. The frontend labels these "First seen this week" / "Not seen this week," deliberately avoiding "Resolved"/"New problem" language that would overclaim what the data actually shows.
+
+**Direction-aware, not sign-aware, coloring.** A raw positive/negative check on a delta gets the color backwards for "lower is better" metrics — a High Urgency count *dropping* is good news and must render green, not red just because the number is negative. The frontend (`WeekComparison.tsx`) assigns each metric an explicit direction (`upIsGood` for Positive Sentiment/Actionable%/Low Urgency, `downIsGood` for Negative Sentiment/Medium+High Urgency, `neutral` for Neutral Sentiment) and colors by whether the change is good or bad for *that* metric, not by the sign of the number.
+
+**The executive summary narrates the diff.** `compute_comparison`'s result is computed and attached to the response *before* the executive-summary LLM call, and passed into it (`prompts/executive_summary.py`'s `comparison_to_previous_week` field) — so the same one summary call that narrates this upload's own facts also states what changed since last time, with concrete before→after values ("negative sentiment fell from 70% to 33%"), grounded only in the numbers actually present in that object. Absent on the first-ever upload, and the prompt is explicitly told not to mention week-over-week change when it's absent.
+
+**The diff is persisted, not recomputed on replay.** `comparison` is saved as part of the snapshot row at the time it's computed — so replaying an old upload via `GET /uploads/{id}` shows the diff exactly as it looked *then* (vs. whatever was "latest" at that time), not recomputed against today's latest upload, which would silently answer a different question.
+
+**History sidebar UX.** Collapsed by default — a "History (N)" toggle button appears only once a dashboard (live or a replayed one) is actually on screen, never on the idle landing page. Clicking it expands a list of every past upload by filename + timestamp; clicking an entry replays that upload's own dashboard read-only (its own KPIs, charts, summary, comparison, and now its own Feedback Explorer table too, via persisted `ticket_items`). A trash icon per row requires an inline "Delete this upload? Yes/No" confirm before calling `DELETE /uploads/{id}` — deleting the entry currently being viewed falls back to the live view automatically.
+
+**Known limitation, deliberately deferred.** Two concurrent `/analyze` requests (e.g. two browser tabs uploading at once) can both read the same "previous" snapshot before either has saved, so their comparisons are both computed against the same prior week rather than against each other. No ticket-level data is corrupted by this — it only affects which upload a comparison is computed against — and it's accepted as a non-issue for a local, single-user tool where concurrent uploads aren't a real usage pattern. Worth revisiting (e.g. `SELECT ... FOR UPDATE` around the read-latest + insert) only if multi-user concurrent use becomes real.
 
 ---
 
@@ -536,6 +619,8 @@ Feedback
                                     attached post-classification, never model output)
 ```
 
+This is the per-ticket shape held in memory during a request and returned in `items[]`. For how (and where) it's persisted across uploads, see **Multi-Week Persistence** — the same shape is stored verbatim as JSONB in `ticket_items.item`.
+
 ---
 
 ## Configuration
@@ -552,6 +637,7 @@ Runtime parameters via environment variables. No secrets in code.
 | REQUEST_TIMEOUT | Per-call timeout | implementation-defined |
 | SUMMARY_MODEL | Optional model for executive summary generation | falls back to LLM_MODEL |
 | LOG_LEVEL | Logging verbosity | INFO |
+| DATABASE_URL | Postgres connection string for multi-week persistence | `postgresql:///loom_dev` (local Unix socket, current OS user) |
 
 ---
 
@@ -561,7 +647,7 @@ Runtime parameters via environment variables. No secrets in code.
 - Validate every LLM response against the schema; recover via the bounded validate → coerce → single re-prompt → fallback sequence (see *Validation & Repair*); never crash.
 - Cap concurrency to respect provider rate limits.
 - Log latency and failures per batch.
-- **Idempotency:** trivially satisfied by construction in the current design. Each `/analyze` call is stateless and independent — there is no persisted state anywhere for a re-run to double-count against, so "re-running the same upload must not double-count" is automatically true (there's nothing to double-count into). This becomes a real, non-trivial requirement (keying processing by upload/run identity so re-runs against stored results are safe) only once persistence is added — see the "Multi-period trends & persistence" row in Deferred Extensions, which is exactly where this requirement re-activates.
+- **Idempotency:** re-running the same CSV through `/analyze` now creates a brand-new upload row rather than updating an existing one — by design, since "I uploaded this week's export again" and "this is a genuinely new week" are indistinguishable from the CSV content alone, and the tool doesn't ask the caller to assert which. There is no dedup-by-content check. This means an accidental double-upload of the same file shows up as two identical-looking history entries rather than being silently merged — acceptable for a manually-triggered local tool; revisit if this ever becomes an automated/scheduled upload pipeline where accidental re-runs are a real failure mode.
 - No hardcoded secrets; keys in environment or a secrets manager.
 
 ---
@@ -580,13 +666,16 @@ Runtime parameters via environment variables. No secrets in code.
 
 ## Evaluation Strategy
 
-Accuracy must be measured, not asserted.
+Accuracy must be measured, not asserted. Built as `backend/eval.py`.
 
-- **Golden set:** the demo dataset is hand-labeled (category, theme, sentiment) as it is built, so it doubles as a trusted answer key.
-- **Hold-out discipline:** the tickets used as few-shot examples in the prompt are **excluded** from the tickets used to measure accuracy. Measuring against examples the model was shown inflates the result.
-- **Metric:** run the held-out set through the pipeline and report accuracy (correct / total), overall accuracy, per-category accuracy, and per-theme accuracy.
+- **Golden set:** the demo dataset is hand-labeled (category, theme, sentiment, urgency, actionable) as it is built, so it doubles as a trusted answer key (`data/loom_answer_key_100.csv` / `loom_answer_key_10.csv`).
+- **Hold-out discipline:** trivially satisfied by construction — the classification prompt (`prompts/classification.py`) uses zero few-shot examples at all, so there is nothing to exclude; every labeled ticket is genuinely held out.
+- **Metric:** `eval.py` runs the real pipeline (validate → preprocess → classify, no mocked LLM) over a feedback CSV, joins results against the answer key by `id`, and reports overall + per-category + per-theme accuracy for category/theme, plus overall accuracy and a detailed per-ticket mismatch list for sentiment/urgency/actionable.
+- **Answer-key "SKIP" rows** (rows expected to be rejected by `validate_csv` before classification) are checked separately — the script verifies they really were skipped, since a "SKIP" row that got classified anyway would itself be a bug, not scored for classification accuracy.
+- **Known real numbers** (100-row set, GPT-4o-mini, 107 scorable tickets): category ~96%, theme ~93%, sentiment ~90%, actionable ~99%, urgency ~78-81% (the weakest field — see the sentiment-score section above for the investigated "Medium bias" and why prompt-tuning attempts to fix it were reverted after measuring no improvement).
 - **Confusion matrix:** deferred. Add it if a single accuracy number proves insufficient for locating error clusters (e.g. Performance vs Functional Issues confusion). It is an inexpensive follow-up, not a first-release requirement.
 - **Data honesty:** if tickets are LLM-generated, hand-write or heavily edit a portion so the evaluation is not merely the model recognizing its own style.
+- **LLM non-determinism caveat:** even at `temperature=0`, provider API calls are not perfectly bit-identical run-to-run in practice — category/theme accuracy has been observed to shift slightly between runs even when only unrelated prompt text changed. A single before/after `eval.py` run is not a fully reliable A/B signal for a small prompt tweak; multi-run averaging would be the fix if this becomes a blocker (not built).
 
 ---
 
@@ -617,13 +706,16 @@ The dataset is both the demo input and the evaluation bench. Each edge case the 
 - Golden-set accuracy evaluation
 - Single-period (current batch) analysis
 
+### In scope (built after first release)
+- **Multi-week persistence** — Postgres storage of every upload's aggregate snapshot + per-ticket items, an automatic week-over-week comparison narrated into the executive summary, and a history sidebar for read-only replay of any past upload. Full contract in **Multi-Week Persistence** above. Superseded the SQLite placeholder this used to name below.
+
 ### Deferred — documented, not built
 Each is a clean extension that does not require reworking the AI pipeline.
 
 | Deferred capability | Why deferred / trigger to build |
 |---------------------|--------------------------------|
-| Duplicate-result caching | Consistency already achieved via temp 0 + discrete + closed lists. Arrives naturally with persistence (storage acts as cache). Build if repeated re-processing becomes costly. |
-| Multi-period trends & persistence | Requires storage (SQLite is sufficient). The fixed taxonomy is already a stable-id vocabulary, so week-over-week deltas and new-theme detection drop in without touching the pipeline. The multi-request API shape (`POST /upload` → `upload_id` → `POST /analyze` → `GET /dashboard`/`GET /summary`) is adopted here, replacing the stateless single call, since results now persist and can be re-queried. **This is also where idempotency (Error Handling & Reliability) becomes a real, non-trivial requirement** — re-runs against persisted results must be keyed by upload/run identity to avoid double-counting, unlike today's trivially-idempotent stateless call. A time-windowed average `sentiment_score` (e.g. weekly) also arrives here, once there's a time axis to average over. |
+| Duplicate-result caching | Consistency already achieved via temp 0 + discrete + closed lists. Build if repeated re-processing of identical CSVs becomes costly. |
+| RAG over feedback history | `ticket_items` (Multi-Week Persistence) already stores per-ticket redacted text with `pgvector` installed alongside the app — the next step is an embedding column on that same table plus retrieval/query logic. Not built yet; this is the next planned phase. |
 | Non-English support | Currently routed to `Other` gracefully. Build language detection + translation step when the dataset warrants it. |
 | Spam / junk filtering | Currently routed to `Other` gracefully. Add a pre-classification gate to protect analytics when real streams introduce noise. |
 | Emergent-theme detection | Fixed themes are blind to new issues, which pool in `Other`. Monitor the `Other` rate as the signal; the automated version is embedding-based clustering. |
@@ -631,6 +723,8 @@ Each is a clean extension that does not require reworking the AI pipeline.
 | Aspect-based sentiment | Correct answer for mixed-sentiment tickets (sentiment per issue). Scoped out; dominant sentiment used instead. |
 | Human review workflow | For low-confidence classifications; build when a confidence signal is added. |
 | API rate limiting | `/analyze` has no request-level throttling — a single caller can currently trigger unbounded concurrent batches, each making real LLM calls. `MAX_CONCURRENCY` bounds in-flight calls *within* one request, but nothing bounds *how many requests* can run at once. Fine for local/demo use with no public exposure; add per-client rate limiting (e.g. `slowapi`, or a gateway-level limit) before any public or multi-tenant deployment, to protect both cost and provider quota. |
+| Concurrent-upload comparison race | Two simultaneous `/analyze` calls can both read the same "previous" snapshot before either saves (see Multi-Week Persistence's Known Limitation). Fix with `SELECT ... FOR UPDATE` if concurrent multi-user uploads become a real usage pattern. |
+| Data retention policy for stored feedback text | `ticket_items.item` now persists redacted feedback text at rest (previously it only ever existed in-memory for one request). Redaction is a regex heuristic, not perfect (documented false-positive/leak caveats above) — worth a retention/deletion policy decision before this holds real customer data at any scale beyond local dev. |
 
 ---
 
@@ -645,25 +739,33 @@ backend/
 │   ├── classify.py      batch classification, validation, repair, fallback
 │   └── summarize.py     long-ticket routing + executive summary
 ├── analytics/           deterministic KPI/aggregation — no LLM import, ever
+├── storage/             Postgres persistence (see Multi-Week Persistence)
+│   ├── db.py            connection + schema (analysis_snapshots, ticket_items)
+│   ├── snapshots.py      save/list/get/delete a snapshot + its ticket items
+│   └── compare.py       pure-Python week-over-week diff (before/after + delta)
 ├── prompts/             prompt templates and output contracts
 ├── schemas/             Pydantic models + canonical taxonomy (taxonomy.py)
 ├── services/            LLM client wrapper, typed errors
 ├── utils/               config loading
 ├── data/                sample/dev CSVs (git-ignored, not shipped)
 ├── tests/               pytest — one file per pipeline stage + an API-level suite
+├── eval.py              classification accuracy vs. a hand-labeled answer key
 ├── cli.py               run the pipeline over any CSV from the terminal
-└── main.py              FastAPI app, CORS, request timing
+└── main.py              FastAPI app, CORS, request timing, schema init on startup
 
 frontend/
 ├── src/
-│   ├── api/             analyzeClient.ts — the one POST /analyze call
-│   ├── hooks/           useAnalyze() — request status + payload state
+│   ├── api/             analyzeClient.ts (the one POST /analyze call),
+│   │                    uploadsClient.ts (GET /uploads, GET/DELETE /uploads/{id})
+│   ├── hooks/           useAnalyze() — request status + payload state;
+│   │                    useUploadHistory() — history list + replay + delete
 │   ├── types/           taxonomy.ts + analyze.ts, mirroring the backend contract
 │   ├── components/      Nav, AmbientStatus, IdleLanding, HeadlineSummary, KpiCards,
-│   │                    ValidationBanner, SummaryPanel, FeedbackExplorer, ExportButton, charts/
+│   │                    ValidationBanner, SummaryPanel, FeedbackExplorer, ExportButton,
+│   │                    HistorySidebar, WeekComparison, charts/
 │   │                    (DistributionBarChart, DonutChart, CategoryDistributionChart,
 │   │                    ThemeFrequencyChart, SentimentDistributionChart, UrgencyBreakdownChart)
-│   ├── pages/           DashboardPage — the single dashboard view
+│   ├── pages/           DashboardPage — the single dashboard view (live + history-replay states)
 │   ├── utils/           colors.ts (the one category/sentiment/urgency color map, also
 │   │                    theme→category derivation), motion.ts (imperative tilt/glow —
 │   │                    never setState, so hover never detaches a mid-click SVG node),
@@ -676,11 +778,12 @@ frontend/
 | api | Endpoints and request orchestration |
 | pipeline | Validation, preprocessing, PII redaction, batching, LLM execution |
 | analytics | Deterministic aggregation and KPIs |
+| storage | Postgres persistence — snapshots, ticket items, week-over-week diff |
 | prompts | Prompt templates and output contracts |
 | schemas | Pydantic models and validation |
 | services | External integrations (LLM, files) |
 | utils | Shared helpers |
-| tests | Backend pytest suite (50 tests) — validation, preprocessing, schema validators, analytics, the classification repair sequence, row-level `warnings` reaching the item, real per-ticket progress events streaming before the result, and the API endpoint, all without a real LLM call |
+| tests | Backend pytest suite (68 tests) — validation, preprocessing (incl. PII redaction edge cases), schema validators, analytics, the classification repair sequence, LLM client retry/backoff/auth behavior, executive-summary fallback paths, row-level `warnings` reaching the item, real per-ticket progress events streaming before the result, the multi-week persistence endpoints (comparison, history replay, delete + cascade), and the API endpoint, all without a real LLM call |
 
 For the exact, currently-accurate directory listing and what each file does, see `backend/README.md` and `frontend/README.md` — this section is the high-level shape; the two READMEs are the maintained source of truth for file-level detail.
 
