@@ -90,7 +90,22 @@ VAGUENESS_BOUNDARY = (
     "content is there, just not enough to categorize — e.g. 'idk what to "
     "say, it's a product I guess'); Unclear for text with essentially no "
     "interpretable content at all (a single word or filler like 'meh' or "
-    "'ok')."
+    "'ok'); Requires Human Review for readable text that is not merely "
+    "vague but genuinely confusing or self-contradictory in a way a human "
+    "would need to untangle — this is a different case from vague, and "
+    "narrower: (a) the ticket asserts something and then cancels or "
+    "reverses that same claim ('it's completely broken but honestly don't "
+    "worry about it, ignore this'); (b) it confidently references specific "
+    "context that was never given ('it's doing that thing again, same as "
+    "last time, you know what I mean'); (c) it jumps between unrelated "
+    "topics with no connecting logic, not two distinct real problems but "
+    "incoherent word-association ('billing keeps crashing my password "
+    "even though the dark mode refund never logged in'); or (d) it states "
+    "an urgent problem and then flatly denies it matters with no "
+    "resolving explanation. Do not use Requires Human Review for ordinary "
+    "vagueness (that is General Feedback) or for a real ticket describing "
+    "two genuinely distinct issues (that is primary + additional_issues, "
+    "not this)."
 )
 
 
