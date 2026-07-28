@@ -28,3 +28,31 @@ class AnalyzeResponse(BaseModel):
     items: list[TicketClassification]
     analytics: dict
     summary: str
+    upload_id: int
+    uploaded_at: str
+    comparison: dict | None = None
+
+
+class SnapshotSummaryOut(BaseModel):
+    id: int
+    uploaded_at: str
+    source_filename: str
+
+
+class SnapshotOut(BaseModel):
+    """A past upload's own dashboard, replayed read-only — including its
+    per-ticket `items` (see storage/ticket_items), so the FeedbackExplorer
+    table works on history replay too, same as the live dashboard.
+    `comparison` is the diff AS IT WAS COMPUTED at the time (vs whatever
+    was "latest" back then) — persisted, not recomputed against today's
+    latest, so replaying an old week always answers "what did this look
+    like against the week before it," never a moving target."""
+
+    id: int
+    uploaded_at: str
+    source_filename: str
+    validation_report: ValidationReportOut
+    items: list[TicketClassification]
+    analytics: dict
+    summary: str
+    comparison: dict | None = None

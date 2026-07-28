@@ -26,12 +26,20 @@ from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from analytics.aggregate import compute_analytics
-from api.response_models import AnalyzeResponse, SkippedRowOut, ValidationReportOut
+from api.response_models import (
+    AnalyzeResponse,
+    SkippedRowOut,
+    SnapshotOut,
+    SnapshotSummaryOut,
+    ValidationReportOut,
+)
 from pipeline.classify import classify_batch_streaming
 from pipeline.preprocess import clean_and_redact, is_long_ticket
 from pipeline.summarize import generate_executive_summary, maybe_summarize
 from pipeline.validate import FileValidationError, validate_csv
 from services.llm_client import LLMClient
+from storage import snapshots
+from storage.compare import compute_comparison
 from utils.config import load_config
 
 logger = logging.getLogger(__name__)
@@ -103,25 +111,80 @@ async def analyze(file: UploadFile) -> StreamingResponse:
 
         facts = compute_analytics(enriched, report)
 
+        # Read the previous snapshot BEFORE saving this one (so "previous"
+        # never accidentally resolves to the upload currently being saved)
+        # and BEFORE the summary call, so the summary can narrate the
+        # week-over-week diff instead of only this upload in isolation.
+        previous = snapshots.get_latest_snapshot()
+        comparison = None
+        if previous is not None:
+            comparison = compute_comparison(previous["analytics"], facts)
+            comparison["previous_uploaded_at"] = previous["uploaded_at"].isoformat()
+
         total = len(prepared)
         yield _ndjson_line({"type": "progress", "stage": "summarizing", "done": total, "total": total})
-        summary = generate_executive_summary(facts, llm_client, model=config.summary_model)
+        summary = generate_executive_summary(facts, llm_client, model=config.summary_model, comparison=comparison)
+
+        validation_report_out = ValidationReportOut(
+            total_rows=report.total_rows,
+            processed=report.processed,
+            skipped=report.skipped,
+            skip_reasons=report.skip_reasons,
+            skipped_rows=[
+                SkippedRowOut(ticket_id=row.ticket_id, reason=row.reason) for row in report.skipped_rows
+            ],
+            fell_back_count=facts["fell_back_count"],
+        )
+
+        saved = snapshots.save_snapshot(
+            validation_report=json.loads(validation_report_out.model_dump_json()),
+            analytics=facts,
+            summary=summary,
+            source_filename=file.filename or "upload.csv",
+            items=[json.loads(item.model_dump_json()) for item in enriched],
+            comparison=comparison,
+        )
 
         response = AnalyzeResponse(
-            validation_report=ValidationReportOut(
-                total_rows=report.total_rows,
-                processed=report.processed,
-                skipped=report.skipped,
-                skip_reasons=report.skip_reasons,
-                skipped_rows=[
-                    SkippedRowOut(ticket_id=row.ticket_id, reason=row.reason) for row in report.skipped_rows
-                ],
-                fell_back_count=facts["fell_back_count"],
-            ),
+            validation_report=validation_report_out,
             items=enriched,
             analytics=facts,
             summary=summary,
+            upload_id=saved["id"],
+            uploaded_at=saved["uploaded_at"].isoformat(),
+            comparison=comparison,
         )
         yield _ndjson_line({"type": "result", "data": json.loads(response.model_dump_json())})
 
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+
+
+@router.get("/uploads")
+async def list_uploads() -> list[SnapshotSummaryOut]:
+    return [
+        SnapshotSummaryOut(id=row["id"], uploaded_at=row["uploaded_at"].isoformat(), source_filename=row["source_filename"])
+        for row in snapshots.list_snapshots()
+    ]
+
+
+@router.get("/uploads/{upload_id}")
+async def get_upload(upload_id: int) -> SnapshotOut:
+    row = snapshots.get_snapshot(upload_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"no upload with id {upload_id}")
+    return SnapshotOut(
+        id=row["id"],
+        uploaded_at=row["uploaded_at"].isoformat(),
+        source_filename=row["source_filename"],
+        validation_report=ValidationReportOut(**row["validation_report"]),
+        items=row["items"],
+        analytics=row["analytics"],
+        summary=row["summary"],
+        comparison=row["comparison"],
+    )
+
+
+@router.delete("/uploads/{upload_id}", status_code=204)
+async def delete_upload(upload_id: int) -> None:
+    if not snapshots.delete_snapshot(upload_id):
+        raise HTTPException(status_code=404, detail=f"no upload with id {upload_id}")

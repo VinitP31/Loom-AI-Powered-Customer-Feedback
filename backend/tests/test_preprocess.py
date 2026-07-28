@@ -30,6 +30,11 @@ def test_redact_pii_phone_number():
     assert redact_pii("call me at 555-123-4567") == "call me at [PHONE]"
 
 
+def test_redact_pii_phone_number_with_parenthesized_area_code():
+    # Parentheses must not break the digit run and leak the area code.
+    assert redact_pii("call me at (555) 123-4567 please") == "call me at [PHONE] please"
+
+
 def test_redact_pii_id_like_number():
     # 5-6 digits -> [ID]
     assert redact_pii("my ticket is 48213") == "my ticket is [ID]"

@@ -1,15 +1,38 @@
 """Shared test fixtures. LLM_MODEL/API_KEY are required by utils.config
 and by LLMClient's constructor even in tests that never make a real call
 (the value is only read, never sent anywhere) — set once, autouse, so no
-test needs to remember to do it."""
+test needs to remember to do it.
+
+DATABASE_URL is pinned to a separate `loom_test` database (not the dev
+DB's `loom_dev`) BEFORE `main` (and its module-level `ensure_schema()`)
+is ever imported — conftest.py always loads before test modules, so this
+module-level assignment beats test_api.py's `from main import app`."""
+
+import os
 
 import pytest
+
+os.environ["DATABASE_URL"] = "postgresql:///loom_test"
 
 
 @pytest.fixture(autouse=True)
 def _required_env(monkeypatch):
     monkeypatch.setenv("LLM_MODEL", "test-model")
     monkeypatch.setenv("API_KEY", "test-key")
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _clean_snapshots():
+    """Truncate analysis_snapshots (and ticket_items, via CASCADE) before
+    each test so no test's saved upload leaks into another's
+    `get_latest_snapshot()`/comparison."""
+    from storage.db import get_connection, ensure_schema
+
+    ensure_schema()
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute("TRUNCATE analysis_snapshots RESTART IDENTITY CASCADE;")
+        conn.commit()
     yield
 
 

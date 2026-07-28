@@ -138,3 +138,129 @@ def test_progress_events_stream_before_the_result_and_reach_the_total(monkeypatc
     assert summarizing[0] == {"type": "progress", "stage": "summarizing", "done": 2, "total": 2}
     # Every progress event must come before the single result event.
     assert [e["type"] for e in events] == ["progress"] * 3 + ["result"]
+
+
+def test_first_upload_has_no_comparison_second_upload_does(monkeypatch, fake_llm_client):
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+
+    fake_llm_client.structured_responses = [VALID_RESPONSE]
+    fake_llm_client.text_responses = ["One ticket processed."]
+    first = _result_data(_upload_events("id,feedback\n1,Charged twice this month.\n"))
+    assert first["comparison"] is None
+    assert isinstance(first["upload_id"], int)
+
+    positive_response = {
+        "primary_category": Category.USABILITY_UX.value,
+        "primary_theme": Theme.POSITIVE_FEEDBACK.value,
+        "sentiment": Sentiment.POSITIVE.value,
+        "sentiment_score": 0.8,
+        "urgency": Urgency.LOW.value,
+        "actionable": False,
+        "additional_issues": [],
+    }
+    fake_llm_client.structured_responses = [positive_response]
+    fake_llm_client.text_responses = ["One glowing review."]
+    second = _result_data(_upload_events("id,feedback\n1,Love the new redesign!\n"))
+
+    assert second["upload_id"] == first["upload_id"] + 1
+    assert second["comparison"] is not None
+    assert second["comparison"]["previous_uploaded_at"] == first["uploaded_at"]
+    assert second["comparison"]["sentiment_shift_pct"]["Positive"] == 100.0
+    assert second["comparison"]["sentiment_shift_pct"]["Negative"] == -100.0
+    assert second["comparison"]["new_themes"] == ["Positive Feedback"]
+    assert second["comparison"]["disappeared_themes"] == ["Duplicate Charge"]
+    # Before/after values, not just the bare delta — a "-100" alone doesn't
+    # say what it moved from/to.
+    assert second["comparison"]["sentiment_pct_before"]["Positive"] == 0.0
+    assert second["comparison"]["sentiment_pct_after"]["Positive"] == 100.0
+    assert second["comparison"]["actionable_pct_before"] == 100.0
+    assert second["comparison"]["actionable_pct_after"] == 0.0
+
+    # The executive summary call for the second upload must actually have
+    # received the comparison data — not just computed it and thrown it away.
+    second_summary_call = fake_llm_client.text_calls[-1]
+    assert "comparison_to_previous_week" in second_summary_call[1]
+    assert "Positive" in second_summary_call[1]
+    # The first upload's summary call must NOT mention a comparison at all.
+    first_summary_call = fake_llm_client.text_calls[-2]
+    assert "comparison_to_previous_week" not in first_summary_call[1]
+
+    # theme_sentiment_avg is dropped from what's sent to the summary prompt
+    # entirely (not just told not to mention it) — it reads as a confusing
+    # bare number ("scored a sentiment of 1.0") with no stakeholder context.
+    assert "theme_sentiment_avg" not in first_summary_call[1]
+    assert "theme_sentiment_avg" not in second_summary_call[1]
+
+    # Replaying the second upload later must show the SAME comparison it
+    # had live — persisted, not recomputed against whatever is "latest" at
+    # replay time (there's nothing newer here, but the point is it's read
+    # straight off the row, not derived).
+    replay = client.get(f"/uploads/{second['upload_id']}")
+    assert replay.json()["comparison"] == second["comparison"]
+
+    # The first upload (nothing before it) has no comparison on replay either.
+    first_replay = client.get(f"/uploads/{first['upload_id']}")
+    assert first_replay.json()["comparison"] is None
+
+
+def test_uploads_endpoints_list_and_replay_saved_snapshots(monkeypatch, fake_llm_client):
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+    fake_llm_client.structured_responses = [VALID_RESPONSE]
+    fake_llm_client.text_responses = ["One ticket processed."]
+    uploaded = _result_data(_upload_events("id,feedback\n1,Charged twice this month.\n"))
+
+    listing = client.get("/uploads")
+    assert listing.status_code == 200
+    assert [row["id"] for row in listing.json()] == [uploaded["upload_id"]]
+    assert listing.json()[0]["source_filename"] == "test.csv"
+
+    replay = client.get(f"/uploads/{uploaded['upload_id']}")
+    assert replay.status_code == 200
+    body = replay.json()
+    assert body["source_filename"] == "test.csv"
+    assert body["summary"] == "One ticket processed."
+    assert body["analytics"]["top_category"] == "Billing & Payments"
+    # Per-ticket items are persisted too (storage/ticket_items) — replay
+    # shows the same FeedbackExplorer-able data the live upload had.
+    assert body["items"] == uploaded["items"]
+
+    missing = client.get("/uploads/999999")
+    assert missing.status_code == 404
+
+
+def test_deleting_an_upload_also_deletes_its_ticket_items(monkeypatch, fake_llm_client):
+    """ticket_items has ON DELETE CASCADE on snapshot_id — verify the rows
+    are actually gone, not just unreachable via the API."""
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+    fake_llm_client.structured_responses = [VALID_RESPONSE]
+    fake_llm_client.text_responses = ["One ticket processed."]
+    uploaded = _result_data(_upload_events("id,feedback\n1,Charged twice this month.\n"))
+
+    from storage.db import get_connection
+
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM ticket_items WHERE snapshot_id = %s", (uploaded["upload_id"],))
+        assert cur.fetchone()[0] == 1
+
+    assert client.delete(f"/uploads/{uploaded['upload_id']}").status_code == 204
+
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM ticket_items WHERE snapshot_id = %s", (uploaded["upload_id"],))
+        assert cur.fetchone()[0] == 0
+
+
+def test_delete_upload_removes_it_and_404s_on_repeat(monkeypatch, fake_llm_client):
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+    fake_llm_client.structured_responses = [VALID_RESPONSE]
+    fake_llm_client.text_responses = ["One ticket processed."]
+    uploaded = _result_data(_upload_events("id,feedback\n1,Charged twice this month.\n"))
+    upload_id = uploaded["upload_id"]
+
+    deleted = client.delete(f"/uploads/{upload_id}")
+    assert deleted.status_code == 204
+
+    assert client.get(f"/uploads/{upload_id}").status_code == 404
+    assert [row["id"] for row in client.get("/uploads").json()] == []
+
+    missing_delete = client.delete(f"/uploads/{upload_id}")
+    assert missing_delete.status_code == 404

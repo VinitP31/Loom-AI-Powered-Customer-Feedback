@@ -18,10 +18,13 @@ URL_RE = re.compile(r"https?://\S+")
 WHITESPACE_RE = re.compile(r"\s+")
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
-# Digit-ish runs (allows space/dash/dot separators); classified by digit
-# count after separators are stripped. A letter anywhere breaks the match,
-# so this never eats surrounding words.
-DIGIT_RUN_RE = re.compile(r"\+?\d[\d\-.\s]{3,18}\d")
+# Digit-ish runs (allows space/dash/dot/parenthesis separators); classified
+# by digit count after separators are stripped. A letter anywhere breaks
+# the match, so this never eats surrounding words. Parentheses are
+# included so a US-style area code, e.g. "(555) 123-4567", is consumed as
+# one run — without them the ")" breaks the match and the area code leaks
+# through un-redacted.
+DIGIT_RUN_RE = re.compile(r"\(?\+?\d[\d\-.\s()]{3,18}\d\)?")
 
 
 def has_html(text: str) -> bool:

@@ -21,6 +21,7 @@ class Config:
     request_timeout: float
     summary_model: str
     log_level: str
+    database_url: str
 
 
 def _env(name: str, default: str) -> str:
@@ -42,4 +43,7 @@ def load_config() -> Config:
         request_timeout=float(_env("REQUEST_TIMEOUT", "30")),
         summary_model=os.environ.get("SUMMARY_MODEL") or llm_model,
         log_level=_env("LOG_LEVEL", "INFO"),
+        # Local default: connects via the default Unix socket as the current
+        # OS user, matching a plain `createdb loom_dev` dev setup.
+        database_url=_env("DATABASE_URL", "postgresql:///loom_dev"),
     )

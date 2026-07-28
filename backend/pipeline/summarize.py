@@ -75,13 +75,18 @@ def _fallback_summary_text(facts: dict) -> str:
     )
 
 
-def generate_executive_summary(facts: dict, llm_client: LLMClient, model: str | None = None) -> str:
+def generate_executive_summary(
+    facts: dict, llm_client: LLMClient, model: str | None = None, comparison: dict | None = None
+) -> str:
     """facts is the Python-computed analytics aggregate — the only source
-    of numbers this call is allowed to reference."""
+    of numbers this call is allowed to reference. `comparison` (if this
+    isn't the first-ever upload) is the same week-over-week diff attached
+    to the API response — passed through so the summary can narrate what
+    changed, with before/after values, never a bare delta."""
     try:
         return llm_client.text_call(
             EXECUTIVE_SUMMARY_SYSTEM_PROMPT,
-            build_executive_summary_user_message(facts),
+            build_executive_summary_user_message(facts, comparison),
             model=model,
         )
     except LLMError as exc:
