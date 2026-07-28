@@ -287,7 +287,7 @@ backend/
 | `4002` | Empty CSV / zero data rows |
 | `4003` | No valid feedback rows after validation |
 
-Every classification failure (malformed model output, timeout, validation failure) resolves internally to a fallback shape (`Other` / `Requires Human Review`) — it never raises an HTTP error. The API only returns 4xx for the file-level problems above; everything else always returns `200` with `fell_back_count` reflecting how many tickets needed the safety net.
+Every classification failure (malformed model output, timeout, validation failure) resolves internally to a fallback shape (`Other` / `Requires Human Review`) — it never raises an HTTP error. The API only returns 4xx for the file-level problems above; everything else always returns `200` with `fell_back_count` reflecting how many tickets needed the safety net. The model is also explicitly instructed to choose `Other` / `Requires Human Review` directly for readable-but-genuinely-confusing tickets (self-contradictory, referencing context never given, incoherent topic-mixing, or an urgent claim immediately denied) — a real, everyday trigger now, not just a rare repair-sequence failure; see `prompts/classification.py`'s vagueness-boundary instruction.
 
 ---
 
