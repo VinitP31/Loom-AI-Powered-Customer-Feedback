@@ -121,4 +121,7 @@ export const allOneCategoryResponseFixture: AnalyzeResponse = {
   },
   summary:
     "The customer feedback indicates a strong focus on issues related to Billing & Payments, which accounts for 100% of the processed feedback. The most prominent theme driving this feedback is Unexpected Charge, which, along with Duplicate Charge and Refund Delay, highlights significant concerns among customers. Notably, all feedback carries a negative sentiment, with a total of 5 responses categorized as negative. There is a sense of urgency present, with 3 issues marked as high urgency, signaling an immediate need for attention and resolution. Despite the challenges reflected in the feedback, the processing success rate stands at 100%, indicating that all submissions were handled effectively.",
+  upload_id: 1,
+  uploaded_at: "2026-06-20T10:00:00+00:00",
+  comparison: null,
 };

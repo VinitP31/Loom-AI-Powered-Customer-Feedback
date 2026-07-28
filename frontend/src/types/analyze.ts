@@ -90,11 +90,72 @@ export interface Analytics {
   top_themes: Theme[];
 }
 
+/**
+ * Week-over-week diff against the previous upload — pure Python-computed
+ * (backend/storage/compare.py), never recomputed here. Keyed dicts follow
+ * the same "only present keys, never assume every enum member" rule as
+ * Analytics above. Percentage-point deltas (sentiment/category) and
+ * count deltas (urgency) can be positive, negative, or zero.
+ */
+export interface Comparison {
+  previous_uploaded_at: string;
+  sentiment_shift_pct: Partial<Record<Sentiment, number>>;
+  sentiment_pct_before: Partial<Record<Sentiment, number>>;
+  sentiment_pct_after: Partial<Record<Sentiment, number>>;
+  category_shift_pct: Partial<Record<Category, number>>;
+  urgency_shift_count: Partial<Record<Urgency, number>>;
+  urgency_count_before: Partial<Record<Urgency, number>>;
+  urgency_count_after: Partial<Record<Urgency, number>>;
+  new_themes: Theme[];
+  disappeared_themes: Theme[];
+  high_urgency_count_delta: number;
+  high_urgency_count_before: number;
+  high_urgency_count_after: number;
+  actionable_pct_delta: number;
+  actionable_pct_before: number;
+  actionable_pct_after: number;
+  fell_back_count_delta: number;
+  fell_back_count_before: number;
+  fell_back_count_after: number;
+}
+
 export interface AnalyzeResponse {
   validation_report: ValidationReport;
   items: TicketClassification[];
   analytics: Analytics;
   summary: string;
+  /** Row id in the `analysis_snapshots` table this upload was saved as. */
+  upload_id: number;
+  uploaded_at: string;
+  /** null on the first-ever upload — nothing to compare against yet. */
+  comparison: Comparison | null;
+}
+
+/** GET /uploads — one entry per past upload, newest first. */
+export interface UploadSummary {
+  id: number;
+  uploaded_at: string;
+  source_filename: string;
+}
+
+/**
+ * GET /uploads/{id} — a past upload's own dashboard, replayed read-only.
+ * Includes `items` (storage/ticket_items — one row per ticket, persisted
+ * alongside the aggregate snapshot), so the FeedbackExplorer table works
+ * on history replay too, same as the live dashboard.
+ */
+export interface HistoricalSnapshot {
+  id: number;
+  uploaded_at: string;
+  source_filename: string;
+  validation_report: ValidationReport;
+  items: TicketClassification[];
+  analytics: Analytics;
+  summary: string;
+  /** The diff AS COMPUTED at the time this upload was saved (vs whatever
+   * was "latest" back then) — persisted, not recomputed against today's
+   * latest upload. null on the first-ever upload. */
+  comparison: Comparison | null;
 }
 
 /** Structured shape of a 4xxx file-validation error response body,

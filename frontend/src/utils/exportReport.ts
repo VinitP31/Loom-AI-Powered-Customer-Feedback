@@ -10,11 +10,23 @@
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import type { AnalyzeResponse } from "../types/analyze";
+import type { Analytics, TicketClassification, ValidationReport } from "../types/analyze";
 
 // jspdf-autotable attaches this to the jsPDF instance at runtime; no
 // public type export for it, so a narrow local cast stands in for `any`.
 type WithAutoTable = jsPDF & { lastAutoTable: { finalY: number } };
+
+/** Both a live AnalyzeResponse and a read-only HistoricalSnapshot export
+ * the same report shape — `items` is optional because history only
+ * persists the aggregate snapshot (no per-ticket data), so a historical
+ * export's "Needs Review" row list is simply empty, same as any other
+ * upload with zero fell-back tickets. */
+interface ExportableData {
+  validation_report: ValidationReport;
+  analytics: Analytics;
+  summary: string;
+  items?: TicketClassification[];
+}
 
 function leaderText(single: string | null, leaders: string[]): string {
   if (single) return single;
@@ -28,7 +40,7 @@ function pct(n: number): string {
 
 /** One shared shape both exporters render from — a title plus a list of
  * (metric, value) rows or (name, count, %) distribution tables. */
-function buildReportSections(data: AnalyzeResponse, fileName: string | null) {
+function buildReportSections(data: ExportableData, fileName: string | null) {
   const { validation_report: v, analytics: a, summary } = data;
 
   const summaryRows: [string, string][] = [
@@ -55,7 +67,7 @@ function buildReportSections(data: AnalyzeResponse, fileName: string | null) {
 
   const skippedRows: [string, string][] = v.skipped_rows.map((row) => [row.ticket_id, row.reason.replace(/_/g, " ")]);
 
-  const needsReviewRows: [string, string][] = data.items
+  const needsReviewRows: [string, string][] = (data.items ?? [])
     .filter((item) => item.primary_theme === "Requires Human Review")
     .map((item) => [item.ticket_id, item.feedback_text]);
 
@@ -72,7 +84,7 @@ function buildReportSections(data: AnalyzeResponse, fileName: string | null) {
   };
 }
 
-export function exportReportPdf(data: AnalyzeResponse, fileName: string | null) {
+export function exportReportPdf(data: ExportableData, fileName: string | null) {
   const s = buildReportSections(data, fileName);
   const doc = new jsPDF({ unit: "pt" });
   const marginX = 40;

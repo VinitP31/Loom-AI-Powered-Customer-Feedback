@@ -92,4 +92,7 @@ export const analyzeResponseFixture: AnalyzeResponse = {
   },
   summary:
     "The customer feedback reveals a notable pattern of concern, with a significant portion of responses indicating high urgency issues, as evidenced by two high urgency counts out of three processed feedbacks. The feedback is evenly distributed across three categories: Billing & Payments, Performance & Reliability, and Usability & User Experience, each representing 33.3% of the total. In terms of themes, App Crash, Duplicate Charge, and Positive Feedback are tied as the top themes, highlighting both negative experiences and a positive sentiment in the feedback. However, the overall sentiment leans negative, with 66.7% of the feedback categorized as negative, suggesting an urgent need for attention to the issues raised. Despite this, there is a positive signal present, with one instance of positive feedback indicating some customer satisfaction.",
+  upload_id: 1,
+  uploaded_at: "2026-06-20T10:00:00+00:00",
+  comparison: null,
 };

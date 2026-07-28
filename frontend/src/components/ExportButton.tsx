@@ -3,14 +3,22 @@
  * distributions, and the executive summary (never the raw ticket list;
  * that's already searchable in FeedbackExplorer). Pure client-side
  * formatting of the existing payload — no new request, no
- * recomputation (see utils/exportReport.ts).
+ * recomputation (see utils/exportReport.ts). Works for a live upload
+ * (AnalyzeResponse) and a read-only historical replay (HistoricalSnapshot)
+ * alike — a historical export just has an empty "Needs Review" row list,
+ * since only the aggregate snapshot is persisted, not per-ticket items.
  */
 
-import type { AnalyzeResponse } from "../types/analyze";
+import type { Analytics, TicketClassification, ValidationReport } from "../types/analyze";
 import { exportReportPdf } from "../utils/exportReport";
 
 interface ExportButtonProps {
-  data: AnalyzeResponse;
+  data: {
+    validation_report: ValidationReport;
+    analytics: Analytics;
+    summary: string;
+    items?: TicketClassification[];
+  };
   fileName: string | null;
 }
 

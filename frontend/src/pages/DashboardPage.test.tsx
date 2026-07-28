@@ -40,8 +40,14 @@ describe("DashboardPage", () => {
     // SummaryPanel renders the backend's executive summary verbatim.
     expect(screen.getByText(analyzeResponseFixture.summary)).toBeInTheDocument();
 
-    expect(fetch).toHaveBeenCalledTimes(1);
-    const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    // The history sidebar's GET /uploads (on mount + after a successful
+    // analysis) shares the same stubbed fetch — find the /analyze call
+    // specifically rather than assuming it's the only call made.
+    const analyzeCall = (fetch as ReturnType<typeof vi.fn>).mock.calls.find(([url]) =>
+      String(url).includes("/analyze"),
+    );
+    expect(analyzeCall).toBeDefined();
+    const [url, init] = analyzeCall!;
     expect(url).toContain("/analyze");
     expect(init.method).toBe("POST");
     expect(init.body).toBeInstanceOf(FormData);

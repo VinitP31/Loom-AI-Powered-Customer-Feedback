@@ -277,24 +277,36 @@ export default function FeedbackExplorer({
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-wide text-ink-muted">
               <th className="w-6 px-3 py-2"></th>
-              <th className="cursor-pointer px-3 py-2" onClick={() => toggleSort("ticket_id")}>
-                Ticket{sortArrow("ticket_id")}
+              <th className="px-3 py-2">
+                <button type="button" className="cursor-pointer border-0 bg-transparent p-0 font-inherit uppercase tracking-wide text-inherit" onClick={() => toggleSort("ticket_id")}>
+                  Ticket{sortArrow("ticket_id")}
+                </button>
               </th>
               <th className="px-3 py-2">Feedback</th>
-              <th className="cursor-pointer px-3 py-2" onClick={() => toggleSort("primary_category")}>
-                Category{sortArrow("primary_category")}
+              <th className="px-3 py-2">
+                <button type="button" className="cursor-pointer border-0 bg-transparent p-0 font-inherit uppercase tracking-wide text-inherit" onClick={() => toggleSort("primary_category")}>
+                  Category{sortArrow("primary_category")}
+                </button>
               </th>
-              <th className="cursor-pointer px-3 py-2" onClick={() => toggleSort("primary_theme")}>
-                Theme{sortArrow("primary_theme")}
+              <th className="px-3 py-2">
+                <button type="button" className="cursor-pointer border-0 bg-transparent p-0 font-inherit uppercase tracking-wide text-inherit" onClick={() => toggleSort("primary_theme")}>
+                  Theme{sortArrow("primary_theme")}
+                </button>
               </th>
-              <th className="cursor-pointer px-3 py-2" onClick={() => toggleSort("sentiment")}>
-                Sentiment{sortArrow("sentiment")}
+              <th className="px-3 py-2">
+                <button type="button" className="cursor-pointer border-0 bg-transparent p-0 font-inherit uppercase tracking-wide text-inherit" onClick={() => toggleSort("sentiment")}>
+                  Sentiment{sortArrow("sentiment")}
+                </button>
               </th>
-              <th className="cursor-pointer px-3 py-2" onClick={() => toggleSort("urgency")}>
-                Urgency{sortArrow("urgency")}
+              <th className="px-3 py-2">
+                <button type="button" className="cursor-pointer border-0 bg-transparent p-0 font-inherit uppercase tracking-wide text-inherit" onClick={() => toggleSort("urgency")}>
+                  Urgency{sortArrow("urgency")}
+                </button>
               </th>
-              <th className="cursor-pointer px-3 py-2" onClick={() => toggleSort("actionable")}>
-                Actionable{sortArrow("actionable")}
+              <th className="px-3 py-2">
+                <button type="button" className="cursor-pointer border-0 bg-transparent p-0 font-inherit uppercase tracking-wide text-inherit" onClick={() => toggleSort("actionable")}>
+                  Actionable{sortArrow("actionable")}
+                </button>
               </th>
             </tr>
           </thead>
@@ -312,8 +324,17 @@ export default function FeedbackExplorer({
               return (
                 <Fragment key={t.ticket_id}>
                   <tr
-                    className={`cursor-pointer border-t border-hairline hover:bg-surface-2 ${isReview ? "bg-accent/5" : ""}`}
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={isExpanded}
+                    className={`cursor-pointer border-t border-hairline hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 ${isReview ? "bg-accent/5" : ""}`}
                     onClick={() => toggleExpanded(t.ticket_id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleExpanded(t.ticket_id);
+                      }
+                    }}
                   >
                     <td className="px-3 py-2 text-ink-muted">{isExpanded ? "−" : "+"}</td>
                     <td className="px-3 py-2 font-mono text-ink">
