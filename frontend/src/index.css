@@ -164,28 +164,6 @@ body {
   }
 }
 
-/* Heartbeat border: two short dashed lines continuously travel the full
-   perimeter of every KPI card (not just on hover) — drawn as an actual SVG
-   rect stroke (pathLength="100" normalizes stroke-dasharray/offset to a
-   0-100 scale regardless of the card's real pixel perimeter), animated via
-   stroke-dashoffset. This traces the literal border path — the earlier
-   conic-gradient + CSS mask approach silently failed to clip in Chromium
-   and rendered as a wedge from the center instead of a border line. */
-.kpi-border-trace rect {
-  animation: kpi-border-travel 3.2s linear infinite;
-}
-@keyframes kpi-border-travel {
-  to {
-    stroke-dashoffset: -100;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .kpi-border-trace rect {
-    animation: none;
-    opacity: 0.5;
-  }
-}
-
 .kpi-shine {
   border-radius: inherit;
   opacity: 0;

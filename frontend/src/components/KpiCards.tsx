@@ -205,28 +205,18 @@ export default function KpiCards({
                 : undefined
             }
             title={kpi.onClick ? "Click to filter the ticket table" : undefined}
-            className={`kpi-card group relative overflow-hidden rounded-lg border px-3 py-2 will-change-transform hover:shadow-[0_16px_30px_-14px_rgba(0,0,0,0.32)] hover:border-[color-mix(in_oklab,var(--tone,var(--color-accent))_45%,var(--color-hairline))] ${
+            className={`kpi-card group relative overflow-hidden rounded-lg border py-2 pl-4 pr-3 will-change-transform hover:shadow-[0_16px_30px_-14px_rgba(0,0,0,0.32)] hover:border-[color-mix(in_oklab,var(--tone,var(--color-accent))_45%,var(--color-hairline))] ${
               kpi.onClick ? "cursor-pointer" : ""
             } ${kpi.active ? "border-[var(--tone,var(--color-accent))] ring-2 ring-[color-mix(in_oklab,var(--tone,var(--color-accent))_35%,transparent)]" : "border-hairline"}`}
             style={{ "--tone": kpi.tone ? TONE_VAR[kpi.tone] : undefined, animationDelay: `${i * 40}ms` } as CSSProperties}
             onMouseMove={handleCardMouseMove}
             onMouseLeave={handleCardMouseLeave}
           >
-            <svg className="kpi-border-trace pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
-              <rect
-                x="1"
-                y="1"
-                width="99%"
-                height="99%"
-                rx="7"
-                ry="7"
-                fill="none"
-                stroke={kpi.tone ? TONE_VAR[kpi.tone] : "var(--color-accent)"}
-                strokeWidth="1.5"
-                strokeDasharray="16 84"
-                pathLength="100"
-              />
-            </svg>
+            <span
+              className="pointer-events-none absolute inset-y-0 left-0 w-[3px] rounded-l-lg"
+              style={{ background: kpi.tone ? TONE_VAR[kpi.tone] : "var(--color-accent)" }}
+              aria-hidden="true"
+            />
             <span className="kpi-shine pointer-events-none absolute inset-0" aria-hidden="true" />
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10.5px] font-medium text-ink-muted">{kpi.label}</p>
