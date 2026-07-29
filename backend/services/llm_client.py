@@ -31,8 +31,12 @@ class LLMClient:
         timeout: float | None = None,
         max_retries: int = 2,
         backoff_base_seconds: float = 0.5,
+        embedding_model: str | None = None,
     ):
         self.model = model or os.environ["LLM_MODEL"]
+        self.embedding_model = embedding_model or os.environ.get(
+            "EMBEDDING_MODEL", "text-embedding-3-small"
+        )
         self.max_retries = max_retries
         self.backoff_base_seconds = backoff_base_seconds
         timeout = timeout if timeout is not None else float(os.environ.get("REQUEST_TIMEOUT", 30))
@@ -129,3 +133,17 @@ class LLMClient:
 
         response = self._call_with_retry(_call)
         return (response.choices[0].message.content or "").strip()
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Embeddings for RAG retrieval — a separate endpoint from chat
+        completions, hence its own model (EMBEDDING_MODEL) but the same
+        client/retry semantics. Returns one vector per input text, same
+        order. Empty input short-circuits without a network call."""
+        if not texts:
+            return []
+
+        def _call():
+            return self._client.embeddings.create(model=self.embedding_model, input=texts)
+
+        response = self._call_with_retry(_call)
+        return [item.embedding for item in response.data]

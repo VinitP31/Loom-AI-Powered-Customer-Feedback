@@ -4,6 +4,8 @@ summary. Typed so FastAPI validates the outgoing payload and generates
 correct OpenAPI docs.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 from schemas.models import TicketClassification
@@ -56,3 +58,24 @@ class SnapshotOut(BaseModel):
     analytics: dict
     summary: str
     comparison: dict | None = None
+
+
+class ChatRequest(BaseModel):
+    """scope='dashboard' searches one upload's tickets (snapshot_id
+    required); scope='all' searches every upload's tickets so far."""
+
+    question: str
+    scope: Literal["dashboard", "all"]
+    snapshot_id: int | None = None
+
+
+class ChatSourceOut(BaseModel):
+    ticket_id: str
+    snapshot_id: int
+    source_filename: str
+    similarity: float
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    sources: list[ChatSourceOut]

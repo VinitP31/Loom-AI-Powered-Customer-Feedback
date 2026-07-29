@@ -20,6 +20,7 @@ streaming-response characteristic, not something patched here.
 import io
 import json
 import logging
+import re
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, UploadFile
@@ -28,6 +29,9 @@ from fastapi.responses import StreamingResponse
 from analytics.aggregate import compute_analytics
 from api.response_models import (
     AnalyzeResponse,
+    ChatRequest,
+    ChatResponse,
+    ChatSourceOut,
     SkippedRowOut,
     SnapshotOut,
     SnapshotSummaryOut,
@@ -37,6 +41,8 @@ from pipeline.classify import classify_batch_streaming
 from pipeline.preprocess import clean_and_redact, is_long_ticket
 from pipeline.summarize import generate_executive_summary, maybe_summarize
 from pipeline.validate import FileValidationError, validate_csv
+from prompts.chat import CHAT_SYSTEM_PROMPT, build_chat_user_message
+from services.errors import LLMError
 from services.llm_client import LLMClient
 from storage import snapshots
 from storage.compare import compute_comparison
@@ -109,6 +115,17 @@ async def analyze(file: UploadFile) -> StreamingResponse:
             c.model_copy(update={"warnings": row.warnings}) for c, row in zip(classifications, report.valid_rows)
         ]
 
+        # One batch embedding call for the whole upload's tickets, for RAG
+        # chat retrieval later. Best-effort: a failure here degrades to no
+        # embeddings for this upload (chat retrieval just excludes these
+        # tickets) rather than failing the whole analysis — same pattern as
+        # summarization in pipeline/summarize.py.
+        try:
+            embeddings = llm_client.embed([item.feedback_text for item in enriched])
+        except LLMError as exc:
+            logger.warning("embedding call failed (%s); chat won't index this upload's tickets", exc)
+            embeddings = [None] * len(enriched)
+
         facts = compute_analytics(enriched, report)
 
         # Read the previous snapshot BEFORE saving this one (so "previous"
@@ -143,6 +160,7 @@ async def analyze(file: UploadFile) -> StreamingResponse:
             source_filename=file.filename or "upload.csv",
             items=[json.loads(item.model_dump_json()) for item in enriched],
             comparison=comparison,
+            embeddings=embeddings,
         )
 
         response = AnalyzeResponse(
@@ -188,3 +206,99 @@ async def get_upload(upload_id: int) -> SnapshotOut:
 async def delete_upload(upload_id: int) -> None:
     if not snapshots.delete_snapshot(upload_id):
         raise HTTPException(status_code=404, detail=f"no upload with id {upload_id}")
+
+
+@router.post("/chat")
+async def chat(payload: ChatRequest) -> ChatResponse:
+    """RAG + facts chat over persisted tickets. scope='dashboard' searches
+    one upload's tickets; scope='all' searches every upload so far.
+    Ticket ranking is a real pgvector `<=>` cosine-distance query (see
+    storage.snapshots.search_similar_tickets) — no ANN index yet, exact
+    scan is fine at the current handful of snapshots. Results below
+    RAG_MIN_SIMILARITY are dropped entirely rather than padded out to
+    top_k with unrelated tickets — can return fewer than top_k, or zero.
+
+    Alongside ticket retrieval, `current_upload_facts` (the same
+    Python-computed analytics/comparison the executive summary narrates
+    from — see prompts/chat.py) is fetched for whichever upload is "this
+    week": the given snapshot_id in scope='dashboard', or the most recent
+    upload in scope='all' ("vs last week" naturally means the latest
+    upload's own comparison). This is what makes aggregate/comparison
+    questions ("top category", "what changed since last week") actually
+    answerable instead of always refused — the model is told to use facts
+    for those, retrieved tickets only for content questions."""
+    if payload.scope == "dashboard" and payload.snapshot_id is None:
+        raise HTTPException(status_code=400, detail="snapshot_id is required when scope is 'dashboard'")
+
+    config = load_config()
+
+    # Cheap existence check before spending an embedding call on a
+    # question nothing can answer yet (e.g. no uploads at all).
+    if not snapshots.list_snapshots():
+        return ChatResponse(answer="No analyzed tickets are available yet to answer from.", sources=[])
+
+    facts: snapshots.SnapshotFacts | None
+    if payload.scope == "dashboard":
+        facts = snapshots.get_snapshot_facts(payload.snapshot_id)  # type: ignore[arg-type]
+    else:
+        latest = snapshots.get_latest_snapshot()
+        facts = (
+            {"analytics": latest["analytics"], "comparison": latest["comparison"], "uploaded_at": latest["uploaded_at"]}
+            if latest is not None
+            else None
+        )
+
+    llm_client = LLMClient(
+        model=config.llm_model,
+        api_key=config.api_key,
+        timeout=config.request_timeout,
+        embedding_model=config.embedding_model,
+    )
+
+    try:
+        query_embedding = llm_client.embed([payload.question])[0]
+    except LLMError as exc:
+        raise HTTPException(status_code=502, detail=f"embedding call failed: {exc}") from exc
+
+    top = snapshots.search_similar_tickets(
+        query_embedding,
+        snapshot_id=payload.snapshot_id if payload.scope == "dashboard" else None,
+        top_k=config.rag_top_k,
+        min_similarity=config.rag_min_similarity,
+    )
+    if not top and facts is None:
+        return ChatResponse(
+            answer="Nothing in these tickets looks related to that question.", sources=[]
+        )
+
+    try:
+        answer = llm_client.text_call(CHAT_SYSTEM_PROMPT, build_chat_user_message(payload.question, top, facts))
+    except LLMError as exc:
+        raise HTTPException(status_code=502, detail=f"chat call failed: {exc}") from exc
+
+    # `sources` is what the model actually cited, not everything
+    # retrieval happened to surface — a greeting, a refusal, or an answer
+    # that only needed one of five retrieved tickets shouldn't drag the
+    # rest along as if they backed the answer too. CHAT_SYSTEM_PROMPT
+    # requires "(ticket_id)" inline, but smaller models don't always
+    # comply (e.g. writing "Ticket D07:" instead) — also catch a bare
+    # letter-prefixed ticket id anywhere in the text (D07, T007, W03).
+    # Purely numeric ids are deliberately excluded from that fallback —
+    # too likely to collide with an unrelated number in prose — so a
+    # dataset using plain numeric ids still needs the parenthetical form.
+    cited_ids = set(re.findall(r"\(([A-Za-z0-9_-]+)\)", answer))
+    cited_ids |= set(re.findall(r"\b([A-Za-z]+\d+)\b", answer))
+    cited = [t for t in top if t["ticket_id"] in cited_ids]
+
+    return ChatResponse(
+        answer=answer,
+        sources=[
+            ChatSourceOut(
+                ticket_id=t["ticket_id"],
+                snapshot_id=t["snapshot_id"],
+                source_filename=t["source_filename"],
+                similarity=round(t["similarity"], 3),
+            )
+            for t in cited
+        ],
+    )

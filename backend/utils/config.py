@@ -22,6 +22,9 @@ class Config:
     summary_model: str
     log_level: str
     database_url: str
+    embedding_model: str
+    rag_top_k: int
+    rag_min_similarity: float
 
 
 def _env(name: str, default: str) -> str:
@@ -46,4 +49,7 @@ def load_config() -> Config:
         # Local default: connects via the default Unix socket as the current
         # OS user, matching a plain `createdb loom_dev` dev setup.
         database_url=_env("DATABASE_URL", "postgresql:///loom_dev"),
+        embedding_model=_env("EMBEDDING_MODEL", "text-embedding-3-small"),
+        rag_top_k=int(_env("RAG_TOP_K", "5")),
+        rag_min_similarity=float(_env("RAG_MIN_SIMILARITY", "0.2")),
     )
