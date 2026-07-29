@@ -249,6 +249,180 @@ def test_deleting_an_upload_also_deletes_its_ticket_items(monkeypatch, fake_llm_
         assert cur.fetchone()[0] == 0
 
 
+def test_chat_dashboard_scope_returns_answer_and_sources(monkeypatch, fake_llm_client):
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+    fake_llm_client.structured_responses = [VALID_RESPONSE]
+    fake_llm_client.text_responses = ["One ticket processed."]
+    uploaded = _result_data(_upload_events("id,feedback\n1,Charged twice this month.\n"))
+
+    fake_llm_client.text_responses = ["Ticket 1 is a duplicate charge complaint. (1)"]
+    response = client.post(
+        "/chat",
+        json={"question": "What billing issues came up?", "scope": "dashboard", "snapshot_id": uploaded["upload_id"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] == "Ticket 1 is a duplicate charge complaint. (1)"
+    assert [s["ticket_id"] for s in body["sources"]] == ["1"]
+    assert body["sources"][0]["snapshot_id"] == uploaded["upload_id"]
+    assert body["sources"][0]["source_filename"] == "test.csv"
+
+
+def test_chat_dashboard_scope_requires_snapshot_id(monkeypatch, fake_llm_client):
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+
+    response = client.post("/chat", json={"question": "anything", "scope": "dashboard"})
+
+    assert response.status_code == 400
+
+
+def test_chat_all_scope_searches_across_every_upload(monkeypatch, fake_llm_client):
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+    fake_llm_client.structured_responses = [VALID_RESPONSE]
+    fake_llm_client.text_responses = ["One ticket processed."]
+    first = _result_data(_upload_events("id,feedback\n1,Charged twice this month.\n"))
+
+    fake_llm_client.structured_responses = [VALID_RESPONSE]
+    fake_llm_client.text_responses = ["One ticket processed."]
+    second = _result_data(_upload_events("id,feedback\n1,Billed twice again.\n"))
+
+    fake_llm_client.text_responses = ["Both weeks report duplicate charges. (1)"]
+    response = client.post("/chat", json={"question": "duplicate charges?", "scope": "all"})
+
+    assert response.status_code == 200
+    snapshot_ids = {s["snapshot_id"] for s in response.json()["sources"]}
+    assert snapshot_ids == {first["upload_id"], second["upload_id"]}
+
+
+def test_chat_drops_tickets_below_the_similarity_floor(monkeypatch, fake_llm_client):
+    """Unrelated tickets shouldn't be padded into `sources` just to fill
+    top_k — a ticket whose embedding doesn't point the same direction as
+    the question should be dropped entirely, not shown with a low score."""
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+    fake_llm_client.structured_responses = [VALID_RESPONSE, VALID_RESPONSE]
+    fake_llm_client.text_responses = ["Two tickets processed."]
+    # Ingest: ticket 1's embedding points the same way the question will;
+    # ticket 2's is orthogonal (similarity 0, well under the default floor).
+    fake_llm_client.embed_responses = [[[1.0, 0.0], [0.0, 1.0]]]
+    uploaded = _result_data(
+        _upload_events("id,feedback\n1,Charged twice this month.\n2,App crashes constantly.\n")
+    )
+
+    fake_llm_client.embed_responses = [[[1.0, 0.0]]]
+    fake_llm_client.text_responses = ["Ticket 1 is a duplicate charge. (1)"]
+    response = client.post(
+        "/chat",
+        json={"question": "billing issue?", "scope": "dashboard", "snapshot_id": uploaded["upload_id"]},
+    )
+
+    assert response.status_code == 200
+    sources = response.json()["sources"]
+    assert [s["ticket_id"] for s in sources] == ["1"]
+
+
+def test_chat_only_returns_sources_the_answer_actually_cites(monkeypatch, fake_llm_client):
+    """A greeting, a refusal, or an answer that only needed one of several
+    retrieved tickets shouldn't drag the rest along in `sources` as if
+    they backed the answer too — only ticket ids the model actually
+    wrote as "(ticket_id)" should come back."""
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+    fake_llm_client.structured_responses = [VALID_RESPONSE, VALID_RESPONSE]
+    fake_llm_client.text_responses = ["Two tickets processed."]
+    uploaded = _result_data(
+        _upload_events("id,feedback\n1,Charged twice this month.\n2,App crashes constantly.\n")
+    )
+
+    # Both tickets are retrieved (default fake embeddings are identical),
+    # but the answer only cites one of them.
+    fake_llm_client.text_responses = ["Ticket 1 is a duplicate charge. (1)"]
+    response = client.post(
+        "/chat",
+        json={"question": "billing issue?", "scope": "dashboard", "snapshot_id": uploaded["upload_id"]},
+    )
+    assert [s["ticket_id"] for s in response.json()["sources"]] == ["1"]
+
+    # A greeting cites nothing at all — sources must be empty even though
+    # retrieval still ran and found candidates above the similarity floor.
+    fake_llm_client.text_responses = ["Hello! How can I help you with these tickets?"]
+    response = client.post(
+        "/chat",
+        json={"question": "hi", "scope": "dashboard", "snapshot_id": uploaded["upload_id"]},
+    )
+    assert response.json()["sources"] == []
+
+
+def test_chat_dashboard_scope_includes_current_upload_facts(monkeypatch, fake_llm_client):
+    """Aggregate questions ("top category", "what changed") need real
+    computed facts, not a guess from retrieved ticket text — verify the
+    chat completion call actually receives current_upload_facts."""
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+    fake_llm_client.structured_responses = [VALID_RESPONSE]
+    fake_llm_client.text_responses = ["One ticket processed."]
+    uploaded = _result_data(_upload_events("id,feedback\n1,Charged twice this month.\n"))
+
+    fake_llm_client.text_responses = ["Top category is Billing & Payments."]
+    response = client.post(
+        "/chat",
+        json={"question": "what is the top category?", "scope": "dashboard", "snapshot_id": uploaded["upload_id"]},
+    )
+    assert response.status_code == 200
+
+    chat_call = fake_llm_client.text_calls[-1]
+    assert "current_upload_facts" in chat_call[1]
+    assert "Billing & Payments" in chat_call[1]
+    # First-ever upload — nothing to compare against yet.
+    assert "comparison_to_previous_week" not in chat_call[1]
+
+
+def test_chat_includes_comparison_when_a_previous_upload_exists(monkeypatch, fake_llm_client):
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+    fake_llm_client.structured_responses = [VALID_RESPONSE]
+    fake_llm_client.text_responses = ["One ticket processed."]
+    _result_data(_upload_events("id,feedback\n1,Charged twice this month.\n"))
+
+    fake_llm_client.structured_responses = [VALID_RESPONSE]
+    fake_llm_client.text_responses = ["One ticket processed."]
+    second = _result_data(_upload_events("id,feedback\n1,Billed twice again.\n"))
+
+    fake_llm_client.text_responses = ["Nothing changed."]
+    response = client.post(
+        "/chat",
+        json={"question": "what changed from last week?", "scope": "dashboard", "snapshot_id": second["upload_id"]},
+    )
+    assert response.status_code == 200
+    assert "comparison_to_previous_week" in fake_llm_client.text_calls[-1][1]
+
+
+def test_chat_all_scope_uses_the_most_recent_uploads_facts(monkeypatch, fake_llm_client):
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+    fake_llm_client.structured_responses = [VALID_RESPONSE]
+    fake_llm_client.text_responses = ["One ticket processed."]
+    _result_data(_upload_events("id,feedback\n1,Charged twice this month.\n"))
+
+    fake_llm_client.structured_responses = [VALID_RESPONSE]
+    fake_llm_client.text_responses = ["One ticket processed."]
+    _result_data(_upload_events("id,feedback\n1,Billed twice again.\n"))
+
+    fake_llm_client.text_responses = ["Nothing changed."]
+    response = client.post("/chat", json={"question": "what changed from last week?", "scope": "all"})
+    assert response.status_code == 200
+    assert "comparison_to_previous_week" in fake_llm_client.text_calls[-1][1]
+
+
+def test_chat_with_no_uploads_yet_returns_friendly_message_no_sources(monkeypatch, fake_llm_client):
+    monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
+
+    response = client.post("/chat", json={"question": "anything", "scope": "all"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sources"] == []
+    assert "no analyzed tickets" in body["answer"].lower()
+    # No LLM call should have been made — nothing to answer from.
+    assert fake_llm_client.text_calls == []
+
+
 def test_delete_upload_removes_it_and_404s_on_repeat(monkeypatch, fake_llm_client):
     monkeypatch.setattr("api.routes.LLMClient", lambda **kwargs: fake_llm_client)
     fake_llm_client.structured_responses = [VALID_RESPONSE]

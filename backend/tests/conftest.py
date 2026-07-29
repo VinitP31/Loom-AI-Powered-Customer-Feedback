@@ -45,8 +45,10 @@ class FakeLLMClient:
     def __init__(self):
         self.structured_responses: list[dict | Exception] = []
         self.text_responses: list[str | Exception] = []
+        self.embed_responses: list[list[list[float]] | Exception] = []
         self.structured_calls: list[tuple[str, str]] = []
         self.text_calls: list[tuple[str, str]] = []
+        self.embed_calls: list[list[str]] = []
 
     def structured_call(self, system_prompt, user_message, tool_name, json_schema, max_tokens=1024):
         self.structured_calls.append((system_prompt, user_message))
@@ -58,6 +60,20 @@ class FakeLLMClient:
     def text_call(self, system_prompt, user_message, max_tokens=1024, model=None):
         self.text_calls.append((system_prompt, user_message))
         response = self.text_responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    def embed(self, texts):
+        self.embed_calls.append(texts)
+        if not self.embed_responses:
+            # Deterministic non-zero dummy vector per text — most tests
+            # don't care about embedding content, only that
+            # classification/upload still works when this is called. A
+            # zero vector would make pgvector's cosine distance (`<=>`)
+            # come back NaN, so this must not be all-zeros.
+            return [[1.0, 0.0, 0.0] for _ in texts]
+        response = self.embed_responses.pop(0)
         if isinstance(response, Exception):
             raise response
         return response
