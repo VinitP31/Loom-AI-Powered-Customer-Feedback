@@ -38,7 +38,7 @@ Change it if your backend runs somewhere other than the default `uvicorn main:ap
 
 ## Running it
 
-Start the backend first — see `backend/README.md` (`uvicorn main:app --reload --port 8000` from `backend/`). Nothing in the frontend works without it. Analyzing a CSV is still exactly one network call, `POST /analyze`; separately, the history sidebar reads (`GET /uploads`, `GET /uploads/{id}`) and deletes (`DELETE /uploads/{id}`) from the same backend, and needs Postgres running behind it (see `backend/README.md`'s Requirements) or those calls will fail — the history sidebar just fails quietly and stays empty in that case, it doesn't block the main upload flow.
+Start the backend first — see `backend/README.md` (`uvicorn main:app --reload --port 8000` from `backend/`). Nothing in the frontend works without it. Analyzing a CSV is still exactly one network call, `POST /analyze`; separately, the history sidebar reads (`GET /uploads`, `GET /uploads/{id}`) and deletes (`DELETE /uploads/{id}`), and the chat widget calls (`POST /chat`) from the same backend — all need Postgres (+ `pgvector`) running behind it (see `backend/README.md`'s Requirements) or those calls will fail. The history sidebar fails quietly and stays empty in that case; the chat widget shows its error inline in the chat panel. Neither blocks the main upload flow.
 
 ```bash
 npm run dev
@@ -84,21 +84,28 @@ src/
 │   │                          # line-by-line (progress callback + final result), falls back
 │   │                          # to a plain res.json() if there's no body reader; throws
 │   │                          # AnalyzeApiError with the backend's error_code/message on a 4xx
-│   └── uploadsClient.ts       # GET /uploads (list), GET /uploads/{id} (replay),
-│                              # DELETE /uploads/{id} — history browsing, never calls the LLM
+│   ├── uploadsClient.ts       # GET /uploads (list), GET /uploads/{id} (replay),
+│   │                          # DELETE /uploads/{id} — history browsing, never calls the LLM
+│   └── chatClient.ts          # POST /chat — sendChatMessage(question, scope, snapshotId);
+│                              # scope="all" callers pass snapshotId=null themselves (see useChat)
 ├── hooks/
 │   ├── useAnalyze.ts          # owns request status (idle/loading/success/error), real
 │   │                          # progress ({stage, done, total} off the stream), and the
 │   │                          # response payload — no polling, no persistence
-│   └── useUploadHistory.ts    # owns the past-uploads list, which one (if any) is being
-│                              # replayed (selectedId === null means "viewing live"), the
-│                              # fetched historical snapshot, and delete
+│   ├── useUploadHistory.ts    # owns the past-uploads list, which one (if any) is being
+│   │                          # replayed (selectedId === null means "viewing live"), the
+│   │                          # fetched historical snapshot, and delete
+│   └── useChat.ts             # owns the chat widget's open/closed state, scope
+│                              # ("dashboard"/"all"), message history, and the in-flight
+│                              # ask() call — one conversation per mount, never persisted
 ├── types/
 │   ├── taxonomy.ts            # Category/Theme/Sentiment/Urgency string unions, mirrored
 │   │                          # character-for-character from backend/schemas/taxonomy.py
-│   └── analyze.ts             # full /analyze response shape (ValidationReport,
-│                              # TicketClassification, Analytics, AnalyzeResponse, Comparison,
-│                              # UploadSummary, HistoricalSnapshot)
+│   ├── analyze.ts             # full /analyze response shape (ValidationReport,
+│   │                          # TicketClassification, Analytics, AnalyzeResponse, Comparison,
+│   │                          # UploadSummary, HistoricalSnapshot)
+│   └── chat.ts                # ChatScope, ChatSource, ChatResponse — mirrors
+│                              # backend/api/response_models.py's Chat* models
 ├── components/
 │   ├── Nav.tsx                # top bar: brand, dark-mode toggle, upload trigger
 │   ├── AmbientStatus.tsx      # borderless status line below Nav (batch name + stage text —
@@ -136,6 +143,12 @@ src/
 │   │                          # landing page). Lists past uploads by filename + timestamp;
 │   │                          # click replays one read-only; a delete icon per row requires
 │   │                          # an inline Yes/No confirm before calling DELETE /uploads/{id}
+│   ├── ChatWidget.tsx         # "Chat with Tickets" — the Morphing Orb. Fixed bottom-right,
+│   │                          # rendered only once a dashboard is on screen (same rule as
+│   │                          # History). Breathes/gradient-shifts while idle (pure CSS
+│   │                          # keyframes in index.css), morphs shape on open. Scope toggle
+│   │                          # (This dashboard/All history); messages + cited-ticket chips;
+│   │                          # "This dashboard" disabled with no current snapshot id
 │   └── charts/
 │       ├── DistributionBarChart.tsx      # shared Recharts bar chart (labels, tooltip,
 │       │                                 # vertical gridlines, optional click-to-filter —
@@ -186,10 +199,11 @@ Mirrors `backend/README.md`'s Response Shape exactly (the frontend's `types/anal
 - **Export** (`ExportButton`): a one-click PDF report of the KPIs, the four distributions, the skipped-rows and needs-review lists, and the executive summary — deliberately not a dump of every ticket (that's already in the table above), built client-side from the same payload, nothing recomputed.
 - **Vs Last Week** (`WeekComparison`): shown whenever `comparison` is non-null — on the live dashboard, and on any historical upload replayed via the sidebar that had one saved. Before→after value per metric plus a two-bar mini chart, never a bare delta.
 - **History sidebar** (`HistorySidebar`): collapsed by default. A "History (N)" toggle button only appears once a dashboard (live or replayed) is actually on screen — never on the idle landing page. Expanded, it lists every past upload; clicking one replays that week's own dashboard read-only (including its own ticket table, via persisted per-ticket data); a delete icon per row requires an inline confirm before permanently removing it.
+- **Chat with Tickets** (`ChatWidget`): a gradient orb, fixed bottom-right, rendered only once a dashboard (live or replayed) is on screen — same rule as History. Ask a free-text question, scoped to "This dashboard" (the upload currently on screen) or "All history"; answers come from `POST /chat`, grounded in the backend's real computed facts and/or cited retrieved tickets — never invented client-side, same as everything else on the dashboard.
 
 What it deliberately does **not** do (see `frontend/CLAUDE.md`'s "Do NOT" list for the full set):
 - Never calls an LLM or any AI service — it only renders what the backend already returned.
-- Never makes more than one backend call per *analysis* — no polling, no second request for `/analyze` itself. (The history sidebar's own reads/delete are a separate, allowed concern — they never touch the LLM either.)
+- Never makes more than one backend call per *analysis* — no polling, no second request for `/analyze` itself. (The history sidebar's own reads/delete, and the chat widget's `POST /chat` calls, are separate, allowed concerns — distinct requests the user explicitly triggers, not a hidden second step of the analysis flow.)
 - Never recomputes an analytic the backend already sent (e.g. an average `sentiment_score`, or the week-over-week `comparison`) — it displays backend-computed numbers, or at most a simple share computed against `processed` (never against `total_rows`).
 - Never adds its *own* client-side persistence layer (no localStorage/IndexedDB/cache) — the backend now persists history server-side, but the frontend still just fetches it fresh each time, the same way it's always fetched `/analyze`'s result.
 
@@ -218,3 +232,6 @@ That's the only configuration surface. There's no API key, no build-time secret,
 | `tsc -b` fails referencing a `.test.tsx` file | Test files are included in `tsconfig.app.json`'s `src` include and type-checked like any other source file | Fix the type error in the test — it's a real one, not a build-config issue |
 | History toggle button never appears | No dashboard is on screen yet (idle landing page), or `GET /uploads` failed silently | Upload a CSV first (history only mounts on "screen 2"); check the Network tab for a failed `/uploads` call — usually means Postgres isn't running behind the backend, see `backend/README.md`'s Troubleshooting |
 | "Vs Last Week" section never shows up | This is the first upload ever (`comparison` is `null` by design), or you're viewing a historical upload that predates this feature | Upload a second CSV to see a real comparison |
+| Chat orb never appears | No dashboard is on screen yet (idle landing page) — same visibility rule as History | Upload a CSV or open a historical upload first |
+| Chat always replies "nothing to answer from" | Uploads made before `pgvector` was set up have no stored embeddings (see `backend/README.md`'s Troubleshooting) | Upload a fresh CSV after the backend's `pgvector` setup is working |
+| "This dashboard" scope toggle is disabled in the chat panel | No current snapshot id available (shouldn't normally happen once a dashboard is on screen) | Use "All history" scope, or check `dashboardSnapshotId` is being passed to `ChatWidget` from `DashboardPage` |

@@ -37,7 +37,8 @@ These are governing constraints. Every implementation decision must be consisten
 | Backend | FastAPI | Async APIs, automatic OpenAPI |
 | Validation | Pydantic | Type-safe schema enforcement and repair |
 | Data handling | Pandas | CSV parsing and tabular processing |
-| AI | LLM API | Semantic classification and narration only |
+| AI | LLM API | Semantic classification, narration, chat, and embeddings |
+| Persistence | Postgres + `pgvector` | Multi-week snapshots, per-ticket embeddings, RAG chat retrieval |
 
 ---
 
@@ -77,11 +78,24 @@ These are governing constraints. Every implementation decision must be consisten
                                           +--------------------------+
                                           |   Postgres (storage/)    |
                                           | analysis_snapshots       |
-                                          | ticket_items             |
-                                          +--------------------------+
+                                          | ticket_items (+embedding)|
+                                          +-------------+------------+
+                                                         ^
+                                                         |
+                                          +--------------+------------+
+                                          |     POST /chat            |
+                                          | embed question (LLM)      |
+                                          | pgvector <=> search       |
+                                          | + current_upload_facts    |
+                                          | -> one grounded LLM reply |
+                                          +---------------------------+
+                                                         ^
+                                                         |
+                                          React "Chat with Tickets"
+                                            widget (Morphing Orb)
 ```
 
-Every `/analyze` run persists its result (aggregate snapshot + per-ticket items + the week-over-week diff, all computed above) to Postgres before responding — this is a write on the way out, not a second request. See **Multi-Week Persistence** below for the full contract.
+Every `/analyze` run persists its result (aggregate snapshot + per-ticket items + the week-over-week diff, all computed above) to Postgres before responding — this is a write on the way out, not a second request. See **Multi-Week Persistence** below for the full contract. Each ticket's redacted text is also embedded at that point and stored in `ticket_items.embedding` (a real `pgvector` column) — this is what the RAG chat feature (**Chat with Tickets**, below) searches over. `POST /chat` is a separate, later request, independent of `/analyze`.
 
 ---
 
@@ -469,6 +483,7 @@ Computed in Python over validated results:
 | Feedback Explorer (table) | Structured feedback objects with search, sorting, filtering (category/theme/sentiment/urgency/actionable), and pagination (15 rows/page, resets to page 1 on any filter/search/sort change or a new upload — so a 100+ ticket batch never dumps one unbroken list) — search/filter operates on the `feedback_text` field now returned per item; `was_summarized` and row-level `warnings` are shown as badges. Also renders on a historical replay (see Multi-Week Persistence), using that upload's persisted `items` |
 | Vs Last Week | Shown on the live dashboard (and preserved on replay of any upload that had one) when `comparison` is non-null. Each tile shows a before → after value plus a two-bar mini chart, colored by whether the metric's direction is actually good or bad news for that specific metric (e.g. a High Urgency count *dropping* is green, not red) — never a bare delta with no baseline. See Multi-Week Persistence for the full field list |
 | History Sidebar | Collapsed by default, toggled open via a "History (N)" button that only appears once a dashboard (live or replayed) is on screen — never shown on the idle landing screen. Lists every past upload by filename + timestamp; clicking one replays that upload's own dashboard read-only; a delete icon per row requires an inline Yes/No confirm before calling `DELETE /uploads/{id}` |
+| Chat with Tickets (widget) | A gradient orb, fixed bottom-right, rendered only once a dashboard (live or replayed) is on screen — same visibility rule as History. Breathes/gradient-shifts while idle, morphs into a chat panel on click. Scope toggle (This dashboard / All history); answers come from `POST /chat` (see Chat with Tickets (RAG) below), grounded in real computed facts and/or cited retrieved tickets, never invented |
 
 Every chart must be self-explanatory: titled, axis-labeled, and interpretable by a stakeholder without a walkthrough. Bar charts additionally carry vertical gridlines for a scale reference and are keyboard-accessible (Tab + Enter/Space per bar), not mouse-only. The dashboard consumes processed API data only and issues no LLM calls.
 
@@ -484,6 +499,7 @@ The classification pipeline itself still runs in a **single request** — the CS
 | `GET /uploads` | List every past upload (id, timestamp, filename), newest first — powers the history sidebar |
 | `GET /uploads/{id}` | Replay one past upload's full dashboard read-only (aggregate + items + its own comparison, if it had one) |
 | `DELETE /uploads/{id}` | Permanently delete one upload and its ticket items (cascades) |
+| `POST /chat` | RAG + facts chat over persisted tickets — see **Chat with Tickets (RAG)** below |
 
 ### `POST /analyze`
 
@@ -585,6 +601,94 @@ One `ticket_items` row per ticket per upload. `ON DELETE CASCADE` means deleting
 
 ---
 
+## Chat with Tickets (RAG)
+
+A conversational widget on the dashboard ("Chat with Tickets" — the Morphing Orb, see Dashboard Specification) lets a user ask free-text questions about the tickets already analyzed. It is a fully separate request from `/analyze` — `POST /chat` — issued whenever the user asks a question, never as part of the upload flow.
+
+**Two distinct data sources, never blended:**
+
+1. **`current_upload_facts`** — the same Python-computed `analytics`/`comparison` the executive summary narrates from (see Stage 7). Real counts, percentages, top category/theme, and the week-over-week diff, for one specific upload. This is the *only* source aggregate/statistical/comparison questions ("what's the top category", "what changed since last week") are allowed to be answered from — retrieval is never treated as proof of a count or a total.
+2. **`retrieved_tickets`** — a similarity-matched sample of individual ticket text (pgvector search, below). This is what content/specific-ticket questions ("who complained about X") are answered from, cited inline.
+
+The model is explicitly instructed which source to use per question type, and never lets one source answer a question that belongs to the other — a single retrieved ticket is never presented as proof of "the top category" or "the main issue," and `current_upload_facts` alone can never produce a ticket quote.
+
+### Embeddings — real `pgvector`, generated at ingest
+
+Every `/analyze` call, after classification, sends each ticket's cleaned/redacted `feedback_text` to the embeddings API (`EMBEDDING_MODEL`, default `text-embedding-3-small` — one 1536-number float vector per ticket) in a single batch call, and stores the result in `ticket_items.embedding` — a genuine `pgvector` column (extension `CREATE EXTENSION IF NOT EXISTS vector`), not a JSON array. Left with **no fixed dimension** on the column itself, so a future change of `EMBEDDING_MODEL` (different vector length) doesn't require a schema migration.
+
+**Best-effort, not a hard requirement.** If the embedding call fails, the upload still succeeds — the ticket is just stored with `embedding IS NULL` and silently excluded from chat retrieval, the same degrade-gracefully pattern as summarization (Stage 4). One bad embedding call never blocks an upload.
+
+### Retrieval — a real pgvector query, no ANN index yet
+
+`storage/snapshots.py`'s `search_similar_tickets()` embeds the user's question, then runs:
+
+```sql
+SELECT * FROM (
+    SELECT t.ticket_id, t.item, s.id AS snapshot_id, s.source_filename, s.uploaded_at,
+           1 - (t.embedding <=> %s) AS similarity
+    FROM ticket_items t
+    JOIN analysis_snapshots s ON s.id = t.snapshot_id
+    WHERE t.embedding IS NOT NULL [AND t.snapshot_id = %s]
+) ranked
+WHERE similarity >= %s
+ORDER BY similarity DESC
+LIMIT %s
+```
+
+`<=>` is pgvector's cosine-distance operator (0 = identical direction, 2 = opposite); `similarity = 1 - distance` so higher reads as "more relevant." `scope="dashboard"` filters to one `snapshot_id`; `scope="all"` searches every upload. `RAG_MIN_SIMILARITY` (default `0.2`) drops anything below the bar entirely, rather than padding results out to `RAG_TOP_K` (default `5`) with unrelated tickets — a query can legitimately return fewer than `top_k`, or zero.
+
+**No ANN index (ivfflat/hnsw).** An exact sequential scan is fast enough at the current scale (a handful of weekly snapshots, a few hundred tickets total) and simpler to reason about than an index. Add one only once history grows large enough for a full scan to matter — see Scope & Extensions.
+
+**Known caveat: the similarity floor doesn't cleanly separate relevant from irrelevant.** OpenAI's `text-embedding-3-small` embeddings have a fairly high baseline cosine similarity between *any* two pieces of English text — a genuinely relevant ticket has been observed scoring *lower* (e.g. 0.15) than an unrelated one (e.g. 0.26) on the same query. `RAG_MIN_SIMILARITY` filters out the clearest noise (an off-topic query like "how to make a bomb" correctly returns zero results) but is not a precise relevance classifier for this embedding model — a genuinely relevant ticket can still be cut by the floor, and an irrelevant one can still clear it. Accepted as a known limitation, not something a threshold tweak alone fully fixes.
+
+### What the model is told, and what it must refuse
+
+`prompts/chat.py`'s `CHAT_SYSTEM_PROMPT` rules, in effect:
+
+- Aggregate/statistical/"top/main/biggest/most common"/comparison questions ("top category", "what changed since last week", "which category performed better") → answer ONLY from `current_upload_facts`; if the specific figure isn't there (e.g. `comparison_to_previous_week` is absent — no earlier upload to compare against), refuse and point to the dashboard's KPI cards / "Vs Last Week" section, never guess from retrieved tickets.
+- `top_category`/`top_theme` ties are respected the same way the dashboard does — null means named the tied leaders jointly, never present one as the sole winner.
+- Content/specific-ticket questions → answer ONLY from `retrieved_tickets`, cite the ticket_id(s) inline.
+- **A retrieved ticket may only be cited if its own fields actually match what's being asked** — e.g. a *Positive*-sentiment ticket must never be cited as an example of "worst reviews" just because it was the closest text match; if nothing in `retrieved_tickets` actually matches, say so plainly rather than citing a non-matching ticket anyway.
+- A greeting or small talk gets a plain, brief reply — no forced citation, no discussion of either data source.
+- Never infer "this week" vs. "last week" from a ticket's filename or position — the only real timing signal is each ticket's `uploaded_at`, and even that doesn't establish a full period's boundaries on its own.
+
+**`scope="all"`'s "previous week" is always the single most recent upload's own comparison** — if a user asks a comparison question in `all` scope while actually meaning some older upload, the answer still reflects the latest upload's diff. A known ambiguity of the `all` scope, not a bug.
+
+### Citation-based sources — not "whatever cleared the floor"
+
+`sources` in the API response is not simply everything `search_similar_tickets` returned — it's only the tickets the model's answer actually cited, cross-checked from the answer text via regex (`\(ticket_id\)`, plus a fallback matching a bare letter-prefixed id like `D07`/`W03` anywhere in the text, since smaller models don't always follow the parenthetical format even when told to explicitly). This fixes two real observed failure modes: a greeting or a refusal dragging along unrelated retrieved tickets as if they backed the reply, and an answer that only needed one of several retrieved tickets showing all of them as if each were used.
+
+### API contract
+
+**`POST /chat`** — request:
+
+```json
+{ "question": "who is having trouble logging in?", "scope": "dashboard", "snapshot_id": 42 }
+```
+
+`scope` is `"dashboard"` (search one upload — `snapshot_id` required) or `"all"` (search every upload — `snapshot_id` ignored). Response:
+
+```json
+{
+  "answer": "Ticket 1 reports being unable to log in with any password. (1)",
+  "sources": [
+    { "ticket_id": "1", "snapshot_id": 42, "source_filename": "week3.csv", "similarity": 0.49 }
+  ]
+}
+```
+
+No uploads saved yet, or nothing clears the similarity floor → a plain "nothing to answer from" message with `sources: []`, no LLM call wasted embedding a question that can't be answered (only the true "zero uploads exist" case skips the call entirely — once at least one upload exists, `current_upload_facts` usually gives the model *something* to reason from, so retrieval turning up nothing doesn't by itself short-circuit the call).
+
+### UI — the Morphing Orb widget
+
+A gradient orb (`frontend/src/components/ChatWidget.tsx`) sits fixed bottom-right, only rendered once a dashboard (live or historical replay) is on screen — same visibility rule as the History toggle, never on the idle landing page. It gently pulses/gradient-shifts while idle (pure CSS keyframes, `prefers-reduced-motion` respected) and **morphs shape** (circle → rounded panel, not a fade) when opened. A scope toggle ("This dashboard" / "All history") sits at the top of the panel; "This dashboard" is disabled when there's no current snapshot id to scope to. Messages render as chat bubbles with a typing indicator while a reply is in flight; cited tickets render as small chips under the assistant's reply (ticket id only — the similarity score is available on hover via the chip's `title`, not shown as visible text, since it's an internal ranking detail rather than something a user needs to read).
+
+### Why Postgres was the right call here too
+
+The multi-week persistence section already covered why Postgres (not SQLite) was chosen — RAG needing to store + embed per-ticket text regardless. This is that phase, now built: `pgvector` lives in the same `ticket_items` table as everything else, no second storage system stood up for it.
+
+---
+
 ## Input Dataset Schema
 
 | Column | Required | Description |
@@ -638,6 +742,9 @@ Runtime parameters via environment variables. No secrets in code.
 | SUMMARY_MODEL | Optional model for executive summary generation | falls back to LLM_MODEL |
 | LOG_LEVEL | Logging verbosity | INFO |
 | DATABASE_URL | Postgres connection string for multi-week persistence | `postgresql:///loom_dev` (local Unix socket, current OS user) |
+| EMBEDDING_MODEL | Model used to embed ticket text for RAG chat | `text-embedding-3-small` |
+| RAG_TOP_K | Max tickets returned by one chat retrieval query | 5 |
+| RAG_MIN_SIMILARITY | Minimum cosine similarity to keep a retrieved ticket at all | 0.2 |
 
 ---
 
@@ -676,6 +783,7 @@ Accuracy must be measured, not asserted. Built as `backend/eval.py`.
 - **Confusion matrix:** deferred. Add it if a single accuracy number proves insufficient for locating error clusters (e.g. Performance vs Functional Issues confusion). It is an inexpensive follow-up, not a first-release requirement.
 - **Data honesty:** if tickets are LLM-generated, hand-write or heavily edit a portion so the evaluation is not merely the model recognizing its own style.
 - **LLM non-determinism caveat:** even at `temperature=0`, provider API calls are not perfectly bit-identical run-to-run in practice — category/theme accuracy has been observed to shift slightly between runs even when only unrelated prompt text changed. A single before/after `eval.py` run is not a fully reliable A/B signal for a small prompt tweak; multi-run averaging would be the fix if this becomes a blocker (not built).
+- **`eval.py` measures classification accuracy only.** Chat with Tickets (RAG) is verified separately — via unit tests against a `FakeLLMClient` and manual live checks against a real backend — not by a golden-set accuracy script; it has no single "correct answer" per question the way a ticket's category/theme does.
 
 ---
 
@@ -709,6 +817,7 @@ The dataset is both the demo input and the evaluation bench. Each edge case the 
 
 ### In scope (built after first release)
 - **Multi-week persistence** — Postgres storage of every upload's aggregate snapshot + per-ticket items, an automatic week-over-week comparison narrated into the executive summary, and a history sidebar for read-only replay of any past upload. Full contract in **Multi-Week Persistence** above. Superseded the SQLite placeholder this used to name below.
+- **Chat with Tickets (RAG)** — a conversational widget answering free-text questions over persisted tickets, backed by real `pgvector` similarity search plus the same Python-computed facts the executive summary narrates from. Full contract in **Chat with Tickets (RAG)** above. Supersedes the "RAG over feedback history" deferred entry this used to name below.
 
 ### Deferred — documented, not built
 Each is a clean extension that does not require reworking the AI pipeline.
@@ -716,7 +825,9 @@ Each is a clean extension that does not require reworking the AI pipeline.
 | Deferred capability | Why deferred / trigger to build |
 |---------------------|--------------------------------|
 | Duplicate-result caching | Consistency already achieved via temp 0 + discrete + closed lists. Build if repeated re-processing of identical CSVs becomes costly. |
-| RAG over feedback history | `ticket_items` (Multi-Week Persistence) already stores per-ticket redacted text with `pgvector` installed alongside the app — the next step is an embedding column on that same table plus retrieval/query logic. Not built yet; this is the next planned phase. |
+| ANN vector index (ivfflat/hnsw) for chat retrieval | Chat with Tickets (built) does an exact `pgvector` `<=>` scan, no index. Fine at current scale (a handful of weekly snapshots); add an index once history grows large enough for a full scan to matter. |
+| Hybrid keyword + vector search for chat | Pure semantic search can miss exact terms (ticket ids, error codes, names) that embeddings blur past. Add a keyword-match pass alongside the vector search once that starts mattering. |
+| Recency-windowed default scope for chat's "all history" | At many more weeks of history, "all history" searching every upload gets noisier and costlier than it needs to be — a user asking about "lately" rarely means week 1 from months ago. Default to a recent window (e.g. last N weeks) unless the question implies otherwise. |
 | Non-English support | Currently routed to `Other` gracefully. Build language detection + translation step when the dataset warrants it. |
 | Spam / junk filtering | Currently routed to `Other` gracefully. Add a pre-classification gate to protect analytics when real streams introduce noise. |
 | Emergent-theme detection | Fixed themes are blind to new issues, which pool in `Other`. Monitor the `Other` rate as the signal; the automated version is embedding-based clustering. |
@@ -740,13 +851,16 @@ backend/
 │   ├── classify.py      batch classification, validation, repair, fallback
 │   └── summarize.py     long-ticket routing + executive summary
 ├── analytics/           deterministic KPI/aggregation — no LLM import, ever
-├── storage/             Postgres persistence (see Multi-Week Persistence)
-│   ├── db.py            connection + schema (analysis_snapshots, ticket_items)
-│   ├── snapshots.py      save/list/get/delete a snapshot + its ticket items
+├── storage/             Postgres persistence (see Multi-Week Persistence + Chat with Tickets)
+│   ├── db.py            connection + schema (analysis_snapshots, ticket_items + pgvector
+│   │                    extension/column), registers the pgvector psycopg adapter
+│   ├── snapshots.py      save/list/get/delete a snapshot + its ticket items,
+│   │                    get_snapshot_facts() (analytics+comparison for chat),
+│   │                    search_similar_tickets() (pgvector `<=>` retrieval)
 │   └── compare.py       pure-Python week-over-week diff (before/after + delta)
-├── prompts/             prompt templates and output contracts
+├── prompts/             prompt templates and output contracts (incl. chat.py — RAG + facts)
 ├── schemas/             Pydantic models + canonical taxonomy (taxonomy.py)
-├── services/            LLM client wrapper, typed errors
+├── services/            LLM client wrapper (chat completions + embeddings), typed errors
 ├── utils/               config loading
 ├── data/                sample/dev CSVs (git-ignored, not shipped)
 ├── tests/               pytest — one file per pipeline stage + an API-level suite
@@ -757,13 +871,16 @@ backend/
 frontend/
 ├── src/
 │   ├── api/             analyzeClient.ts (the one POST /analyze call),
-│   │                    uploadsClient.ts (GET /uploads, GET/DELETE /uploads/{id})
+│   │                    uploadsClient.ts (GET /uploads, GET/DELETE /uploads/{id}),
+│   │                    chatClient.ts (POST /chat)
 │   ├── hooks/           useAnalyze() — request status + payload state;
-│   │                    useUploadHistory() — history list + replay + delete
-│   ├── types/           taxonomy.ts + analyze.ts, mirroring the backend contract
+│   │                    useUploadHistory() — history list + replay + delete;
+│   │                    useChat() — chat widget open state, scope, messages, in-flight ask()
+│   ├── types/           taxonomy.ts + analyze.ts + chat.ts, mirroring the backend contract
 │   ├── components/      Nav, AmbientStatus, IdleLanding, HeadlineSummary, KpiCards,
 │   │                    ValidationBanner, SummaryPanel, FeedbackExplorer, ExportButton,
-│   │                    HistorySidebar, WeekComparison, charts/
+│   │                    HistorySidebar, WeekComparison, ChatWidget (the Morphing Orb
+│   │                    "Chat with Tickets" widget), charts/
 │   │                    (DistributionBarChart, DonutChart, CategoryDistributionChart,
 │   │                    ThemeFrequencyChart, SentimentDistributionChart, UrgencyBreakdownChart)
 │   ├── pages/           DashboardPage — the single dashboard view (live + history-replay states)
@@ -779,12 +896,12 @@ frontend/
 | api | Endpoints and request orchestration |
 | pipeline | Validation, preprocessing, PII redaction, batching, LLM execution |
 | analytics | Deterministic aggregation and KPIs |
-| storage | Postgres persistence — snapshots, ticket items, week-over-week diff |
-| prompts | Prompt templates and output contracts |
+| storage | Postgres persistence — snapshots, ticket items (+ embeddings), week-over-week diff, chat retrieval |
+| prompts | Prompt templates and output contracts, incl. the RAG + facts chat prompt |
 | schemas | Pydantic models and validation |
-| services | External integrations (LLM, files) |
+| services | External integrations — LLM client wrapper (chat completions + embeddings) |
 | utils | Shared helpers |
-| tests | Backend pytest suite (68 tests) — validation, preprocessing (incl. PII redaction edge cases), schema validators, analytics, the classification repair sequence, LLM client retry/backoff/auth behavior, executive-summary fallback paths, row-level `warnings` reaching the item, real per-ticket progress events streaming before the result, the multi-week persistence endpoints (comparison, history replay, delete + cascade), and the API endpoint, all without a real LLM call |
+| tests | Backend pytest suite (80 tests) — validation, preprocessing (incl. PII redaction edge cases), schema validators, analytics, the classification repair sequence, LLM client retry/backoff/auth behavior (incl. the embeddings call), executive-summary fallback paths, row-level `warnings` reaching the item, real per-ticket progress events streaming before the result, the multi-week persistence endpoints (comparison, history replay, delete + cascade), the `/chat` endpoint (both scopes, the similarity floor, citation-based sources filtering, facts inclusion), and the API endpoint, all without a real LLM call |
 
 For the exact, currently-accurate directory listing and what each file does, see `backend/README.md` and `frontend/README.md` — this section is the high-level shape; the two READMEs are the maintained source of truth for file-level detail.
 

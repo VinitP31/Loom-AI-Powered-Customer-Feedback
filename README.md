@@ -52,6 +52,10 @@ I built this end to end — backend pipeline, prompt design, and the React front
 
 **Every upload is remembered.** Each `/analyze` call now persists its result to Postgres. A "History (N)" toggle — collapsed by default, never shown on the idle landing screen — expands into a list of every past upload by filename and timestamp; clicking one replays that week's own dashboard read-only, including its own ticket table. The live dashboard also gets an automatic **"Vs Last Week"** section: before → after values (never a bare delta), colored by whether the change is actually good or bad news for that specific metric — a dropping High Urgency count is green, not red, just because the number went down. The executive summary narrates this shift too ("negative sentiment fell from 70% to 33%"), grounded in the same computed numbers, never invented.
 
+**Ask questions about the tickets, in plain English.** A gradient orb sits fixed bottom-right of the dashboard — gently pulsing while idle, morphing into a chat panel (not fading in) when clicked. Ask "who's having trouble logging in?" or "what changed since last week?" scoped to the current upload or every upload so far. Answers are grounded two ways, never guessed: aggregate/statistical questions ("top category", "what changed") are answered only from the same Python-computed facts the executive summary narrates from; content questions ("who complained about X") are answered only from tickets a real `pgvector` similarity search actually retrieved, cited inline — and only the tickets the answer actually cites show up as sources, never everything retrieval happened to surface.
+
+![Chat with Tickets widget open on the dashboard](docs/screenshots/chat-widget.png)
+
 ---
 
 ## Why it's built this way
@@ -64,6 +68,7 @@ A few decisions that shape everything else in this repo:
 - **PII never reaches the model.** Emails, phone numbers, card numbers, and ID-length digit runs are redacted by regex before any text is sent to the LLM — not after, not "mostly."
 - **The dashboard never calls the LLM.** It renders exactly one backend response. No polling, no second request, no client-side recomputation of anything the backend already computed.
 - **Ties are surfaced, not hidden.** If two categories are tied for the top spot, `top_category` is `null` and `category_leaders` lists both — the frontend is built to handle that explicitly rather than silently picking whichever one happened to come first.
+- **Chat never guesses either.** The "Chat with Tickets" widget answers aggregate questions ("top category", "what changed since last week") only from the same computed facts the dashboard already shows, and content questions only from tickets a real vector search actually retrieved — never letting a handful of similarity-matched tickets stand in for a real count, and never citing a ticket that contradicts the question it's supposedly answering.
 
 If you want the full reasoning behind any of this — including the tradeoffs I made deliberately and documented rather than hid — see [`docs/Loom_Source_of_Truth.md`](docs/Loom_Source_of_Truth.md).
 
@@ -104,10 +109,23 @@ If you want the full reasoning behind any of this — including the tradeoffs I 
                                             |  Postgres (storage/)   |
                                             |  analysis_snapshots    |
                                             |  ticket_items          |
+                                            |  (+ pgvector embedding)|
+                                            +-----------+------------+
+                                                         ^
+                                                         |
+                                            +------------+-----------+
+                                            |      POST /chat        |
+                                            | embed Q -> pgvector    |
+                                            | search + real facts    |
+                                            | -> one grounded reply  |
                                             +------------------------+
+                                                         ^
+                                                         |
+                                              "Chat with Tickets"
+                                               widget (Morphing Orb)
 ```
 
-The classification pipeline itself still runs inside one request — you send a CSV, the response streams real per-ticket progress as classification runs, and the final line carries the complete payload the frontend renders from. What's new: that same call now also persists its result to Postgres on the way out, and three small read/delete endpoints (`GET /uploads`, `GET /uploads/{id}`, `DELETE /uploads/{id}`) exist purely to browse and manage that history — there's still no `upload_id` you pass *in* to `/analyze`.
+The classification pipeline itself still runs inside one request — you send a CSV, the response streams real per-ticket progress as classification runs, and the final line carries the complete payload the frontend renders from. What's new: that same call now also persists its result to Postgres on the way out (embedding each ticket's text into a real `pgvector` column along with it), and small read/delete/query endpoints (`GET /uploads`, `GET /uploads/{id}`, `DELETE /uploads/{id}`, `POST /chat`) exist to browse that history and query it — there's still no `upload_id` you pass *in* to `/analyze`.
 
 ### The pipeline, stage by stage
 
@@ -128,13 +146,13 @@ The classification pipeline itself still runs inside one request — you send a 
 | Backend | Python 3.12, FastAPI | Async, typed, automatic OpenAPI docs |
 | Validation | Pydantic v2 | Schema enforcement *is* the closed-vocabulary guarantee |
 | Data handling | Pandas | CSV parsing |
-| Persistence | Postgres (`psycopg` v3) | Multi-week history — snapshots + per-ticket items; `pgvector` installed alongside for the planned RAG phase |
-| AI | OpenAI (`gpt-4o-mini` by default) | Structured output via forced function-calling — no free-text parsing |
+| Persistence | Postgres (`psycopg` v3) + `pgvector` | Multi-week history — snapshots + per-ticket items, each embedded into a real `pgvector` column for RAG chat retrieval |
+| AI | OpenAI (`gpt-4o-mini` + `text-embedding-3-small` by default) | Structured output via forced function-calling for classification/chat — no free-text parsing; embeddings for chat retrieval |
 | Frontend | React 19 + TypeScript, Vite | Modular, type-safe UI, fast dev loop |
 | Styling | Tailwind CSS v4 | Design tokens as CSS custom properties → light/dark theming with no per-component variants |
 | Charts | Recharts | Declarative, accessible, labeled by default |
 | Export | jsPDF + jspdf-autotable | Client-side PDF report generation — no server round-trip |
-| Backend tests | pytest | 68 tests, no real LLM calls needed to run them |
+| Backend tests | pytest | 80 tests, no real LLM calls needed to run them |
 | Frontend tests | Vitest + Testing Library + jsdom | Real component interactions against payloads captured from the live backend |
 
 ---
@@ -150,6 +168,19 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+Postgres + `pgvector` is required (multi-week history and the chat feature both need it):
+
+```bash
+brew install postgresql@16 pgvector
+brew services start postgresql@16
+createdb loom_dev
+```
+
+If `pgvector` fails to load at startup (`CREATE EXTENSION vector` error), Homebrew's bottle didn't match your Postgres version — see [`backend/README.md`](backend/README.md#requirements) for the one-time build-from-source fix (no data loss, no Postgres upgrade needed).
+
+```bash
 cp .env.example .env
 ```
 
@@ -260,7 +291,11 @@ A few things worth knowing before you consume this response:
 
 `GET /uploads` lists every past upload (id, timestamp, filename), newest first. `GET /uploads/{id}` replays one past upload's full dashboard read-only — same shape as above, including its own `items` and its own `comparison` exactly as it was computed at the time (not recomputed against today's latest). `DELETE /uploads/{id}` permanently deletes it (204) and cascades to its stored tickets.
 
-Full schema, every field, and the reasoning behind each rule: [`backend/README.md`](backend/README.md#response-shape).
+### Chat endpoint
+
+`POST /chat` — `{ "question": "...", "scope": "dashboard" | "all", "snapshot_id": 42 }` → `{ "answer": "...", "sources": [{ "ticket_id": "1", "snapshot_id": 42, "source_filename": "week3.csv", "similarity": 0.49 }] }`. Two data sources, never blended: aggregate/statistical/comparison questions ("top category", "what changed since last week") are answered only from the same Python-computed facts the executive summary narrates from; content questions ("who complained about X") are answered only from tickets a real `pgvector` cosine-similarity search retrieved, cited inline. `sources` reflects only what the answer actually cited, never everything retrieval surfaced.
+
+Full schema, every field, and the reasoning behind each rule: [`backend/README.md`](backend/README.md#response-shape) (analyze/uploads) and [`backend/README.md`](backend/README.md#chat-endpoint) (chat).
 
 ---
 
@@ -289,9 +324,9 @@ Each service's own README is the maintained source of truth for its file-level s
 
 Both halves have a real, currently-passing test suite — not aspirational, not skipped, checked as part of building this.
 
-**Backend** — `cd backend && pytest` → 68 tests, zero real LLM calls (a duck-typed `FakeLLMClient` stands in wherever classification/summarization would otherwise fire; a real local Postgres backs the persistence tests, isolated to a separate `loom_test` database, truncated between tests). Covers file/row validation, PII redaction boundaries (including the parenthesized-phone-number regex fix), the theme-category and sentiment-score schema validators, the analytics tie contract, the full validate → coerce → re-prompt → fallback repair sequence, the LLM client's retry/backoff/auth-no-retry behavior, the executive summary's deterministic fallback path, row-level `warnings` reaching the item, that real per-ticket progress events stream before the result, the week-over-week comparison (before/after values, persisted-not-recomputed on replay), delete-with-cascade, and the `/analyze` + `/uploads` endpoints end to end.
+**Backend** — `cd backend && pytest` → 80 tests, zero real LLM calls (a duck-typed `FakeLLMClient` stands in wherever classification/summarization/chat/embeddings would otherwise fire; a real local Postgres + `pgvector` backs the persistence and chat-retrieval tests, isolated to a separate `loom_test` database, truncated between tests). Covers file/row validation, PII redaction boundaries (including the parenthesized-phone-number regex fix), the theme-category and sentiment-score schema validators, the analytics tie contract, the full validate → coerce → re-prompt → fallback repair sequence, the LLM client's retry/backoff/auth-no-retry behavior (including the embeddings call), the executive summary's deterministic fallback path, row-level `warnings` reaching the item, that real per-ticket progress events stream before the result, the week-over-week comparison (before/after values, persisted-not-recomputed on replay), delete-with-cascade, the `/chat` endpoint (both scopes, the similarity floor, citation-based `sources` filtering, facts inclusion for both scopes), and the `/analyze` + `/uploads` endpoints end to end.
 
-**Frontend** — `cd frontend && npm test` → 26 tests, Vitest + Testing Library, driving real interactions (upload, search, sort, filter, expand a row, **click an actual rendered chart bar and confirm the table narrows**, expand the history sidebar, delete-confirm Yes/No) against `/analyze` payloads captured verbatim from the live backend, not hand-guessed mocks.
+**Frontend** — `cd frontend && npm test` → 33 tests, Vitest + Testing Library, driving real interactions (upload, search, sort, filter, expand a row, **click an actual rendered chart bar and confirm the table narrows**, expand the history sidebar, delete-confirm Yes/No, open the chat widget and send a question with the right scope/snapshot id, verify cited sources render) against `/analyze` payloads captured verbatim from the live backend, not hand-guessed mocks.
 
 Neither suite is exhaustive by design — a handful of tests per concern, chosen to cover the scenarios that are actually load-bearing (the repair sequence, the tie contract, the denominator rule), not every conceivable input. See each README's Testing section for the full breakdown of what's covered and why.
 
@@ -308,6 +343,8 @@ Documented honestly rather than hidden — full detail in [`backend/README.md`](
 - **No API rate limiting** — `/analyze` has no per-client throttle. `MAX_CONCURRENCY` bounds in-flight LLM calls *within* one request, but nothing bounds how many requests can run at once. Fine for local/demo use; add rate limiting before any public or multi-tenant deployment, both to protect cost and to stay under the LLM provider's quota. Tracked as future scope in [`docs/Loom_Source_of_Truth.md`](docs/Loom_Source_of_Truth.md).
 - **Two concurrent uploads can race on "previous snapshot."** Two simultaneous `/analyze` calls can both compute their week-over-week comparison against the same prior upload rather than against each other. No ticket data is corrupted — only which upload a comparison is diffed against — and it's a non-issue for a single-user local tool. Deliberately not fixed; see `docs/Loom_Source_of_Truth.md`.
 - **Feedback text now persists at rest**, not just in-memory for one request (`ticket_items`). Redaction happens before storage, same as before storage existed, but redaction is a heuristic, not perfect (see above) — a real retention/deletion policy is worth deciding before this holds real customer data at any scale beyond local dev.
+- **Chat's similarity floor isn't a precise relevance boundary.** `text-embedding-3-small`'s cosine similarity has a high baseline between any two pieces of English text — a genuinely relevant ticket has scored *lower* than an unrelated one on the same query. `RAG_MIN_SIMILARITY` filters obvious noise, not a reliable relevance classifier.
+- **No ANN index on the chat retrieval query** — an exact `pgvector` scan, fine at the current scale of a handful of weekly uploads. Add an index (ivfflat/hnsw) once history grows large enough for a full scan to matter.
 
 ---
 
