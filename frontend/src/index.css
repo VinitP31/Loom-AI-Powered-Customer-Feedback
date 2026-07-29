@@ -197,6 +197,125 @@ body {
   }
 }
 
+/* ChatWidget (Morphing Orb) — the orb "breathes" (pulsing accent ring)
+   and its gradient slowly drifts while idle, signalling "alive/ready"
+   without a badge or notification dot. Opening morphs shape (circle ->
+   panel) rather than fading in — animation lives on .chat-orb-window
+   itself so it plays every time the panel remounts (isOpen && <div>),
+   no extra open/close class needed from React. */
+@keyframes chat-orb-breathe {
+  0%, 100% {
+    box-shadow:
+      0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent),
+      0 16px 40px rgba(30, 20, 90, 0.22),
+      0 4px 12px rgba(30, 20, 90, 0.14);
+  }
+  50% {
+    box-shadow:
+      0 0 0 14px color-mix(in srgb, var(--color-accent) 0%, transparent),
+      0 16px 40px rgba(30, 20, 90, 0.22),
+      0 4px 12px rgba(30, 20, 90, 0.14);
+  }
+}
+@keyframes chat-orb-gradient-drift {
+  to {
+    background-position: 200% center;
+  }
+}
+.chat-orb-btn {
+  background: linear-gradient(120deg, var(--color-accent), color-mix(in srgb, var(--color-accent) 60%, #9b8cf0), var(--color-accent));
+  background-size: 200% auto;
+  animation:
+    chat-orb-breathe 2.6s ease-in-out infinite,
+    chat-orb-gradient-drift 5s linear infinite;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.chat-orb-btn:hover {
+  transform: scale(1.08) rotate(-4deg);
+}
+.chat-orb-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+@keyframes chat-orb-morph {
+  0% {
+    opacity: 0;
+    transform: scale(0.2) translate(16px, 16px);
+    border-radius: 50%;
+  }
+  60% {
+    border-radius: 20px;
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translate(0, 0);
+    border-radius: 20px;
+  }
+}
+.chat-orb-window {
+  transform-origin: bottom right;
+  animation: chat-orb-morph 0.4s cubic-bezier(0.2, 1, 0.3, 1) both;
+}
+
+@keyframes chat-orb-live-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(111, 224, 138, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(111, 224, 138, 0);
+  }
+}
+.chat-orb-live-dot {
+  animation: chat-orb-live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes chat-orb-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.chat-orb-msg-in {
+  animation: chat-orb-msg-in 0.3s ease both;
+}
+
+@keyframes chat-orb-typing-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+.chat-orb-typing-dot {
+  animation: chat-orb-typing-bounce 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-orb-btn {
+    animation: none;
+  }
+  .chat-orb-window {
+    animation: none;
+  }
+  .chat-orb-live-dot {
+    animation: none;
+  }
+  .chat-orb-msg-in {
+    animation: none;
+  }
+  .chat-orb-typing-dot {
+    animation: none;
+  }
+}
+
 /* Distribution bar hover glow (CategoryDistributionChart,
    ThemeFrequencyChart) — pure CSS :hover, deliberately NOT React state:
    an onMouseEnter-driven re-render detaches the SVG node userEvent.click

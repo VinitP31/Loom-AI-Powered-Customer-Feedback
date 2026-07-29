@@ -16,6 +16,7 @@ import FeedbackExplorer from "../components/FeedbackExplorer";
 import ExportButton from "../components/ExportButton";
 import HistorySidebar from "../components/HistorySidebar";
 import WeekComparison from "../components/WeekComparison";
+import ChatWidget from "../components/ChatWidget";
 import type { Category, Sentiment, Theme, Urgency } from "../types/taxonomy";
 
 export default function DashboardPage() {
@@ -326,6 +327,9 @@ export default function DashboardPage() {
           </div>
         </div>
       </main>
+      {dashboardShowing && (
+        <ChatWidget dashboardSnapshotId={viewingHistory ? (selectedSnapshot?.id ?? null) : (data?.upload_id ?? null)} />
+      )}
     </div>
   );
 }
