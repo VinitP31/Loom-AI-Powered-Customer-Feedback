@@ -198,7 +198,7 @@ export default function DashboardPage() {
             {viewingHistory && (
               <>
                 <div className="flex items-center justify-between rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-xs text-ink-2">
-                  <span>Viewing a past upload (read-only) — the ticket table isn't stored for history.</span>
+                  <span>Viewing a past upload (read-only).</span>
                   <button
                     type="button"
                     onClick={() => selectUpload(null)}
