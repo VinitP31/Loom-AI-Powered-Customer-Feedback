@@ -132,7 +132,7 @@ src/
 │   │                          # distributions + skipped/needs-review lists + summary —
 │   │                          # see utils/exportReport.ts); works on a live payload or a
 │   │                          # HistoricalSnapshot alike
-│   ├── WeekComparison.tsx     # "Vs Last Week" — renders `comparison` when non-null, on the
+│   ├── WeekComparison.tsx     # "Vs Previous Upload" — renders `comparison` when non-null, on the
 │   │                          # live dashboard and on a historical replay that had one.
 │   │                          # Before→after value + a two-bar mini chart per tile, colored
 │   │                          # by whether the direction is good/bad news for THAT metric
@@ -197,7 +197,7 @@ Mirrors `backend/README.md`'s Response Shape exactly (the frontend's `types/anal
 - **Executive summary** (`SummaryPanel`): the backend's grounded narrative, rendered as-is.
 - **Ticket table** (`FeedbackExplorer`): every processed ticket, searchable over feedback text, sortable, filterable by category/theme/sentiment/urgency/actionable, paginated (15/page, so a 100+ ticket batch doesn't dump one giant unbroken list), expandable to show `additional_issues`, with small badges for row-level `warnings` (`html`, `markdown`, `duplicate`) and a "summarized" badge for long tickets.
 - **Export** (`ExportButton`): a one-click PDF report of the KPIs, the four distributions, the skipped-rows and needs-review lists, and the executive summary — deliberately not a dump of every ticket (that's already in the table above), built client-side from the same payload, nothing recomputed.
-- **Vs Last Week** (`WeekComparison`): shown whenever `comparison` is non-null — on the live dashboard, and on any historical upload replayed via the sidebar that had one saved. Before→after value per metric plus a two-bar mini chart, never a bare delta.
+- **Vs Previous Upload** (`WeekComparison`): shown whenever `comparison` is non-null — on the live dashboard, and on any historical upload replayed via the sidebar that had one saved. Before→after value per metric plus a two-bar mini chart, never a bare delta.
 - **History sidebar** (`HistorySidebar`): collapsed by default. A "History (N)" toggle button only appears once a dashboard (live or replayed) is actually on screen — never on the idle landing page. Expanded, it lists every past upload; clicking one replays that week's own dashboard read-only (including its own ticket table, via persisted per-ticket data); a delete icon per row requires an inline confirm before permanently removing it.
 - **Chat with Tickets** (`ChatWidget`): a gradient orb, fixed bottom-right, rendered only once a dashboard (live or replayed) is on screen — same rule as History. Ask a free-text question, scoped to "This dashboard" (the upload currently on screen) or "All history"; answers come from `POST /chat`, grounded in the backend's real computed facts and/or cited retrieved tickets — never invented client-side, same as everything else on the dashboard.
 
@@ -231,7 +231,7 @@ That's the only configuration surface. There's no API key, no build-time secret,
 | Port already in use on `vite` | Another process on the default port | `npm run dev -- --port 5174` (or any free port) |
 | `tsc -b` fails referencing a `.test.tsx` file | Test files are included in `tsconfig.app.json`'s `src` include and type-checked like any other source file | Fix the type error in the test — it's a real one, not a build-config issue |
 | History toggle button never appears | No dashboard is on screen yet (idle landing page), or `GET /uploads` failed silently | Upload a CSV first (history only mounts on "screen 2"); check the Network tab for a failed `/uploads` call — usually means Postgres isn't running behind the backend, see `backend/README.md`'s Troubleshooting |
-| "Vs Last Week" section never shows up | This is the first upload ever (`comparison` is `null` by design), or you're viewing a historical upload that predates this feature | Upload a second CSV to see a real comparison |
+| "Vs Previous Upload" section never shows up | This is the first upload ever (`comparison` is `null` by design), or you're viewing a historical upload that predates this feature | Upload a second CSV to see a real comparison |
 | Chat orb never appears | No dashboard is on screen yet (idle landing page) — same visibility rule as History | Upload a CSV or open a historical upload first |
 | Chat always replies "nothing to answer from" | Uploads made before `pgvector` was set up have no stored embeddings (see `backend/README.md`'s Troubleshooting) | Upload a fresh CSV after the backend's `pgvector` setup is working |
 | "This dashboard" scope toggle is disabled in the chat panel | No current snapshot id available (shouldn't normally happen once a dashboard is on screen) | Use "All history" scope, or check `dashboardSnapshotId` is being passed to `ChatWidget` from `DashboardPage` |

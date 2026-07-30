@@ -3,7 +3,7 @@ boundary (time.perf_counter(), per CLAUDE.md — measured here, not inside
 the pipeline). No auth, no server-side upload session state: POST
 /analyze still runs the whole pipeline within one request. Postgres
 persists each upload's aggregate result (see storage/) for the
-multi-week history sidebar and vs-last-week comparison — schema is
+multi-week history sidebar and vs-previous-upload comparison — schema is
 created on startup if it doesn't already exist.
 """
 

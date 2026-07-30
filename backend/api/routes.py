@@ -220,11 +220,12 @@ async def chat(payload: ChatRequest) -> ChatResponse:
 
     Alongside ticket retrieval, `current_upload_facts` (the same
     Python-computed analytics/comparison the executive summary narrates
-    from — see prompts/chat.py) is fetched for whichever upload is "this
-    week": the given snapshot_id in scope='dashboard', or the most recent
-    upload in scope='all' ("vs last week" naturally means the latest
-    upload's own comparison). This is what makes aggregate/comparison
-    questions ("top category", "what changed since last week") actually
+    from — see prompts/chat.py) is fetched for whichever upload is
+    "current": the given snapshot_id in scope='dashboard', or the most
+    recent upload in scope='all' ("vs previous upload" naturally means the
+    latest upload's own comparison, against whichever single upload
+    preceded it). This is what makes aggregate/comparison questions
+    ("top category", "what changed since the last upload") actually
     answerable instead of always refused — the model is told to use facts
     for those, retrieved tickets only for content questions."""
     if payload.scope == "dashboard" and payload.snapshot_id is None:

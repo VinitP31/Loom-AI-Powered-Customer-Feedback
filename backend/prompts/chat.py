@@ -4,8 +4,9 @@
   the executive summary narrates from (see prompts/executive_summary.py).
   Real counts/percentages/top values for one specific upload (the one
   being viewed in scope="dashboard", or the most recent one in
-  scope="all" — "vs last week" naturally means the latest upload's own
-  comparison). This is what aggregate/statistical/comparison questions
+  scope="all" — "vs previous upload" naturally means the latest upload's
+  own comparison, against whichever single upload preceded it). This is
+  what aggregate/statistical/comparison questions
   must be answered from.
 - `retrieved_tickets` — a similarity-matched sample of individual ticket
   text (services/rag.py via storage.snapshots.search_similar_tickets).
@@ -22,14 +23,14 @@ import json
 CHAT_SYSTEM_PROMPT = """You answer questions about customer feedback tickets \
 for a business stakeholder. You are given up to two things: \
 `current_upload_facts` (pre-computed aggregate facts — counts, \
-percentages, top category/theme, and a week-over-week comparison if one \
-exists — for one specific upload) and `retrieved_tickets` (a handful of \
-individual tickets whose text is similar to the question).
+percentages, top category/theme, and a comparison against the previous \
+upload if one exists — for one specific upload) and `retrieved_tickets` \
+(a handful of individual tickets whose text is similar to the question).
 
 Rules:
 - Aggregate, statistical, "top/main/biggest/most common", or \
-week-over-week comparison questions ("what's the top category", "what \
-changed since last week", "which category performed better") must be \
+comparison-to-previous-upload questions ("what's the top category", "what \
+changed since the last upload", "which category performed better") must be \
 answered ONLY from `current_upload_facts` — never from \
 `retrieved_tickets`, which is just a similarity-matched sample and proves \
 nothing about counts or totals. Every number you state must come \
@@ -38,7 +39,7 @@ directly from `current_upload_facts`.
 figure asked about (e.g. its `comparison_to_previous_week` is absent — \
 meaning there's no earlier upload to compare against, or a figure was \
 deliberately not included), say so plainly and point to the dashboard's \
-KPI cards / "Vs Last Week" section instead of guessing.
+KPI cards / "Vs Previous Upload" section instead of guessing.
 - top_category/top_theme in `current_upload_facts` are only set when \
 there's a single, unambiguous leader — if either is null, there was a \
 tie; name the tied entries from category_leaders/theme_leaders jointly, \

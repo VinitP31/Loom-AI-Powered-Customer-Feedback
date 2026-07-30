@@ -69,7 +69,7 @@ These are governing constraints. Every implementation decision must be consisten
                                                   Structured JSON
                                                          |
                                               Executive Summary (LLM)
-                                              (narrates vs-last-week
+                                              (narrates vs-previous-upload
                                                diff too, when one exists)
                                                          |
                                                  Dashboard Response
@@ -481,7 +481,7 @@ Computed in Python over validated results:
 | Executive Summary (text) | Summary generator |
 | Validation status (skipped / needs-review toggles) | `validation_report.skipped_rows` and items whose `primary_theme` is `Requires Human Review` — each rendered as a toggle chip that expands the real row list, not just an aggregate count |
 | Feedback Explorer (table) | Structured feedback objects with search, sorting, filtering (category/theme/sentiment/urgency/actionable), and pagination (15 rows/page, resets to page 1 on any filter/search/sort change or a new upload — so a 100+ ticket batch never dumps one unbroken list) — search/filter operates on the `feedback_text` field now returned per item; `was_summarized` and row-level `warnings` are shown as badges. Also renders on a historical replay (see Multi-Week Persistence), using that upload's persisted `items` |
-| Vs Last Week | Shown on the live dashboard (and preserved on replay of any upload that had one) when `comparison` is non-null. Each tile shows a before → after value plus a two-bar mini chart, colored by whether the metric's direction is actually good or bad news for that specific metric (e.g. a High Urgency count *dropping* is green, not red) — never a bare delta with no baseline. See Multi-Week Persistence for the full field list |
+| Vs Previous Upload | Shown on the live dashboard (and preserved on replay of any upload that had one) when `comparison` is non-null. Each tile shows a before → after value plus a two-bar mini chart, colored by whether the metric's direction is actually good or bad news for that specific metric (e.g. a High Urgency count *dropping* is green, not red) — never a bare delta with no baseline. See Multi-Week Persistence for the full field list |
 | History Sidebar | Collapsed by default, toggled open via a "History (N)" button that only appears once a dashboard (live or replayed) is on screen — never shown on the idle landing screen. Lists every past upload by filename + timestamp; clicking one replays that upload's own dashboard read-only; a delete icon per row requires an inline Yes/No confirm before calling `DELETE /uploads/{id}` |
 | Chat with Tickets (widget) | A gradient orb, fixed bottom-right, rendered only once a dashboard (live or replayed) is on screen — same visibility rule as History. Breathes/gradient-shifts while idle, morphs into a chat panel on click. Scope toggle (This dashboard / All history); answers come from `POST /chat` (see Chat with Tickets (RAG) below), grounded in real computed facts and/or cited retrieved tickets, never invented |
 
@@ -540,7 +540,7 @@ A consumer that doesn't care about progress can read the whole body and parse on
 
 ## Multi-Week Persistence
 
-Every `/analyze` call now persists its result to Postgres, turning Loom from a one-shot report generator into something that remembers and tracks itself over time: a history sidebar to reopen any past upload, and an automatic "vs last week" comparison on the current one. This section is the built contract — the plan that preceded it is superseded by what's described here.
+Every `/analyze` call now persists its result to Postgres, turning Loom from a one-shot report generator into something that remembers and tracks itself over time: a history sidebar to reopen any past upload, and an automatic "vs previous upload" comparison on the current one. This section is the built contract — the plan that preceded it is superseded by what's described here.
 
 **Why Postgres, not SQLite.** SQLite was the original placeholder choice (see the old Deferred Extensions entry, now folded into this section). Postgres was chosen instead because RAG is planned on top of this same feature and needs to store + embed per-ticket text regardless — Postgres via the `pgvector` extension (already installed alongside the app) can hold those embeddings in the same database and even the same `ticket_items` table, rather than standing up a second storage system for RAG later.
 
@@ -645,7 +645,7 @@ LIMIT %s
 
 `prompts/chat.py`'s `CHAT_SYSTEM_PROMPT` rules, in effect:
 
-- Aggregate/statistical/"top/main/biggest/most common"/comparison questions ("top category", "what changed since last week", "which category performed better") → answer ONLY from `current_upload_facts`; if the specific figure isn't there (e.g. `comparison_to_previous_week` is absent — no earlier upload to compare against), refuse and point to the dashboard's KPI cards / "Vs Last Week" section, never guess from retrieved tickets.
+- Aggregate/statistical/"top/main/biggest/most common"/comparison questions ("top category", "what changed since the last upload", "which category performed better") → answer ONLY from `current_upload_facts`; if the specific figure isn't there (e.g. `comparison_to_previous_week` is absent — no earlier upload to compare against), refuse and point to the dashboard's KPI cards / "Vs Previous Upload" section, never guess from retrieved tickets.
 - `top_category`/`top_theme` ties are respected the same way the dashboard does — null means named the tied leaders jointly, never present one as the sole winner.
 - Content/specific-ticket questions → answer ONLY from `retrieved_tickets`, cite the ticket_id(s) inline.
 - **A retrieved ticket may only be cited if its own fields actually match what's being asked** — e.g. a *Positive*-sentiment ticket must never be cited as an example of "worst reviews" just because it was the closest text match; if nothing in `retrieved_tickets` actually matches, say so plainly rather than citing a non-matching ticket anyway.

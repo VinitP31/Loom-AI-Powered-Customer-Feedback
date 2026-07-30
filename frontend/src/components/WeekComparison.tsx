@@ -1,7 +1,10 @@
 /**
- * Automatic "vs last week" section on the live (latest) upload's
- * dashboard — never shown on a historical replay (that's a past week's
- * own dashboard, not a diff). Renders backend/storage/compare.py's
+ * "Vs Previous Upload" section — compares the current upload against
+ * whichever ONE upload immediately preceded it, never an average or a
+ * roll-up across all history. Shown on the live (latest) upload's
+ * dashboard, and also on a historical replay if that upload had a
+ * comparison saved (persisted, not recomputed against today's latest —
+ * see storage/compare.py). Renders backend/storage/compare.py's
  * already-computed deltas; nothing here is recomputed client-side, same
  * rule as every other chart (frontend/CLAUDE.md golden rule 4).
  *
@@ -138,7 +141,7 @@ export default function WeekComparison({ comparison }: WeekComparisonProps) {
   return (
     <section className="flex flex-col gap-2.5 rounded-lg border border-hairline bg-surface p-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-xs font-semibold text-ink">Vs Last Week</h2>
+        <h2 className="text-xs font-semibold text-ink">Vs Previous Upload</h2>
         <span className="text-[10.5px] text-ink-muted">
           compared to upload on {formatUploadedAt(comparison.previous_uploaded_at)}
         </span>
